@@ -1,0 +1,9 @@
+node_modules
+.next
+npm-debug.log*
+*.log
+.DS_Store
+build/
+.env*
+data/*
+!data/.gitkeep
