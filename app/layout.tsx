@@ -8,9 +8,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "pile — 로그인 없이 던져놓는 실시간 보드",
-  description:
-    "pile은 강의나 워크숍에서 링크, 파일, 메모를 로그인 없이 빠르게 모으는 실시간 보드입니다."
+  title: "pile — 간결한 실시간 보드",
+  description: "로그인 없이 링크, 파일, 메모를 모으는 최소한의 강의용 보드"
 };
 
 export default function RootLayout({
