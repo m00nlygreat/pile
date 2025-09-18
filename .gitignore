@@ -29,5 +29,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# TypeScript incremental build info
+tsconfig.tsbuildinfo
+
 # data directory for uploads/db
 /data
