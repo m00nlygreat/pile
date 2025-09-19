@@ -7,6 +7,7 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "@/db/client";
 import { createBoardWithDefaultChannel } from "@/db/commands";
 import { boards } from "@/db/schema";
+import { formatDateTime } from "@/lib/date-format";
 
 export const metadata: Metadata = {
   title: "DB 테스트 | pile",
@@ -100,10 +101,10 @@ export default async function DbTestPage() {
                     <dt>생성 시각</dt>
                     <dd>
                       {board.createdAt
-                        ? board.createdAt.toLocaleString("ko-KR", {
+                        ? formatDateTime(board.createdAt, {
                             dateStyle: "short",
-                            timeStyle: "medium"
-                          })
+                            timeStyle: "medium",
+                          }) || "-"
                         : "-"}
                     </dd>
                   </div>

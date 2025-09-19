@@ -5,6 +5,7 @@ import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { boards, channels, items } from "@/db/schema";
+import { formatDateTime } from "@/lib/date-format";
 
 const ITEM_TYPE_LABELS: Record<"text" | "file" | "link", string> = {
   text: "텍스트",
@@ -125,10 +126,7 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
           <ol className="message-list">
             {channelItems.map((item) => {
               const createdAtLabel = item.createdAt
-                ? item.createdAt.toLocaleString("ko-KR", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })
+                ? formatDateTime(item.createdAt) || "시간 정보 없음"
                 : "시간 정보 없음";
               const createdAtIso = item.createdAt
                 ? item.createdAt.toISOString()
