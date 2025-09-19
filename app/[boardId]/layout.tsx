@@ -6,7 +6,7 @@ import { db } from "@/db/client";
 import { boards, channels } from "@/db/schema";
 
 import { BoardSidebarNav } from "./sidebar-nav";
-import { notFound } from "next/navigation";
+import { BoardWorkspaceNotFound } from "./board-workspace-not-found";
 
 type BoardLayoutProps = {
   children: ReactNode;
@@ -67,7 +67,7 @@ export default async function BoardLayout({
     .all()[0];
 
   if (!boardRecord) {
-    notFound();
+    return <BoardWorkspaceNotFound boardSlug={boardSlug} />;
   }
 
   const channelList = db

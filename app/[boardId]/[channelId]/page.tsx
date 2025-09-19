@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { boards, channels, items } from "@/db/schema";
+
+import ChannelNotFound from "./not-found";
 
 const ITEM_TYPE_LABELS: Record<"text" | "file" | "link", string> = {
   text: "텍스트",
@@ -75,7 +76,7 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
     .all()[0];
 
   if (!channelRecord) {
-    notFound();
+    return <ChannelNotFound />;
   }
 
   const channelItems = db

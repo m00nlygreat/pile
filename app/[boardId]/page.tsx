@@ -1,8 +1,10 @@
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { boards, channels } from "@/db/schema";
+
+import { BoardWorkspaceNotFound } from "./board-workspace-not-found";
 
 type BoardPageProps = {
   params: {
@@ -27,7 +29,7 @@ export default async function BoardPage({ params }: BoardPageProps) {
     .all()[0];
 
   if (!boardRecord) {
-    notFound();
+    return <BoardWorkspaceNotFound boardSlug={boardSlug} />;
   }
 
   let resolvedChannelSlug: string | null = null;
@@ -56,7 +58,13 @@ export default async function BoardPage({ params }: BoardPageProps) {
   }
 
   if (!resolvedChannelSlug) {
-    notFound();
+    return (
+      <BoardWorkspaceNotFound
+        boardSlug={boardRecord.slug}
+        heading="채널을 불러올 수 없어요"
+        description="이 보드에는 아직 사용할 수 있는 채널이 없습니다. 관리자가 새 채널을 만들어 주세요."
+      />
+    );
   }
 
   redirect(`/${boardRecord.slug}/${resolvedChannelSlug}`);
