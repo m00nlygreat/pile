@@ -156,8 +156,17 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
                       <div className="message-markdown">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
-                          linkTarget="_blank"
-                          linkRel="noreferrer"
+                          components={{
+                            a({ node: _node, ...props }) {
+                              return (
+                                <a
+                                  {...props}
+                                  target={props.target ?? "_blank"}
+                                  rel={props.rel ?? "noreferrer"}
+                                />
+                              );
+                            },
+                          }}
                         >
                           {textContent}
                         </ReactMarkdown>
