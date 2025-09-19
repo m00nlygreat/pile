@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 
@@ -141,11 +143,27 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
               let body: ReactNode;
 
               if (item.type === "text") {
-                body = (
-                  <p className="message-text">
-                    {item.textMd ?? "내용이 비어 있습니다."}
-                  </p>
-                );
+                const textContent = item.textMd ?? "";
+                if (textContent.trim().length === 0) {
+                  body = (
+                    <p className="message-text message-text--muted">
+                      내용이 비어 있습니다.
+                    </p>
+                  );
+                } else {
+                  body = (
+                    <div className="message-text">
+                      <ReactMarkdown
+                        className="message-markdown"
+                        remarkPlugins={[remarkGfm]}
+                        linkTarget="_blank"
+                        linkRel="noreferrer"
+                      >
+                        {textContent}
+                      </ReactMarkdown>
+                    </div>
+                  );
+                }
               } else if (item.type === "link") {
                 body = item.linkUrl ? (
                   <div className="message-link">

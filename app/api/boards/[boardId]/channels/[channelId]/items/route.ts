@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  if (trimmedText.length > MAX_TEXT_LENGTH) {
+  if (normalizedText.length > MAX_TEXT_LENGTH) {
     return NextResponse.json(
       {
         error: `텍스트는 최대 ${MAX_TEXT_LENGTH.toLocaleString("ko-KR")}자까지 업로드할 수 있습니다.`,
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       boardId: boardRecord.id,
       channelId: channelRecord.id,
       type: "text",
-      textMd: trimmedText,
+      textMd: normalizedText,
       sessionStart,
     })
     .run();
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       item: {
         id: itemId,
         type: "text" as const,
-        textMd: trimmedText,
+        textMd: normalizedText,
         sessionStart: sessionStart ? sessionStart.toISOString() : null,
       },
     },
