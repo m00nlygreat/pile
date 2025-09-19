@@ -41,6 +41,7 @@ export function BoardSidebarNav({
                 <Link
                   href={`/${boardSlug}/${channel.slug}`}
                   className="channel-link"
+                  aria-current={isActive ? "page" : undefined}
                   data-active={isActive ? "true" : "false"}
                 >
                   <div className="channel-link-main">
