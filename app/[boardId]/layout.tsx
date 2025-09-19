@@ -106,7 +106,7 @@ export default async function BoardLayout({
           channels={channelList}
         />
       </aside>
-      <section className="workspace-content">{children}</section>
+      <main className="workspace-content">{children}</main>
     </div>
   );
 }
