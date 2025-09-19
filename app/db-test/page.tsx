@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { eq, desc } from "drizzle-orm";
 
 import { db } from "@/db/client";
+import { createBoardWithDefaultChannel } from "@/db/commands";
 import { boards } from "@/db/schema";
 
 export const metadata: Metadata = {
@@ -76,7 +77,9 @@ export default async function DbTestPage() {
                 <header className="db-test-row">
                   <div className="db-test-title">
                     <strong>{board.name}</strong>
-                    <span className="db-test-slug">/{board.slug}</span>
+                    <a className="db-test-slug" href={`/${board.slug}`}>
+                      /{board.slug}
+                    </a>
                   </div>
                   <form action={deleteBoard}>
                     <input type="hidden" name="boardId" value={board.id} />
@@ -160,14 +163,11 @@ async function createBoard(formData: FormData) {
       ? rawDescription.trim()
       : null;
 
-  db.insert(boards)
-    .values({
-      id: randomUUID(),
-      name,
-      slug,
-      description
-    })
-    .run();
+  createBoardWithDefaultChannel(db, {
+    name,
+    slug,
+    description
+  });
 
   revalidatePath("/db-test");
 }

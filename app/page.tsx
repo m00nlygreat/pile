@@ -36,6 +36,9 @@ export default function HomePage() {
           <a className="cta" href="#essentials">
             구성 보기
           </a>
+          <a className="cta" href="/default">
+            기본 보드 열기
+          </a>
           <span>실시간 SSE · Markdown 입력 · 파일 업로드</span>
         </div>
       </header>
