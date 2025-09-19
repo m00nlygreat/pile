@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { notFound } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { boards, channels } from "@/db/schema";
 
 import { BoardSidebarNav } from "./sidebar-nav";
+import { notFound } from "next/navigation";
 
 type BoardLayoutProps = {
   children: ReactNode;
