@@ -6,6 +6,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { boards, channels, items } from "@/db/schema";
 
+import { ChannelComposer } from "./channel-composer";
+
 const ITEM_TYPE_LABELS: Record<"text" | "file" | "link", string> = {
   text: "텍스트",
   file: "파일",
@@ -64,8 +66,10 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
   const channelRecord = db
     .select({
       boardId: boards.id,
+      boardSlug: boards.slug,
       boardName: boards.name,
       channelId: channels.id,
+      channelSlug: channels.slug,
       channelName: channels.name,
     })
     .from(boards)
@@ -201,6 +205,11 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
             })}
           </ol>
         )}
+        <ChannelComposer
+          boardSlug={channelRecord.boardSlug}
+          channelSlug={channelRecord.channelSlug}
+          channelName={channelRecord.channelName}
+        />
       </div>
     </div>
   );
