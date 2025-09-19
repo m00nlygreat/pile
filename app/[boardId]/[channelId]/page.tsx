@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
@@ -70,6 +71,8 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
       boardId: boards.id,
       boardSlug: boards.slug,
       boardName: boards.name,
+      boardDescription: boards.description,
+      boardDefaultChannelId: boards.defaultChannelId,
       channelId: channels.id,
       channelSlug: channels.slug,
       channelName: channels.name,
@@ -83,6 +86,23 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
   if (!channelRecord) {
     notFound();
   }
+
+  const channelList = db
+    .select({
+      id: channels.id,
+      name: channels.name,
+      slug: channels.slug,
+      createdAt: channels.createdAt,
+      orderIndex: channels.orderIndex,
+    })
+    .from(channels)
+    .where(eq(channels.boardId, channelRecord.boardId))
+    .orderBy(asc(channels.orderIndex), asc(channels.createdAt))
+    .all()
+    .map((channel) => ({
+      ...channel,
+      isDefault: channel.id === channelRecord.boardDefaultChannelId,
+    }));
 
   const channelItems = db
     .select({
@@ -105,31 +125,86 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
     .all();
 
   return (
-    <div className="channel-view">
-      <header className="channel-header">
-        <div className="channel-heading">
-          <span aria-hidden className="channel-hash">
-            #
+    <div className="workspace">
+      <aside className="workspace-sidebar">
+        <div className="workspace-board">
+          <span className="workspace-board-slug">
+            /{channelRecord.boardSlug}
           </span>
-          <h1>{channelRecord.channelName}</h1>
-        </div>
-        <p className="channel-subtitle">
-          {channelItems.length === 0
-            ? "아직 메시지가 없습니다."
-            : `총 ${channelItems.length}개 메시지`}
-        </p>
-      </header>
-      <div className="channel-scroll">
-        {channelItems.length === 0 ? (
-          <div className="channel-empty-state">
-            <h2>첫 메시지를 남겨보세요</h2>
-            <p>
-              클립보드에서 붙여넣거나 파일을 드롭하면 이곳에 대화처럼 쌓입니다.
+          <h1>{channelRecord.boardName}</h1>
+          {channelRecord.boardDescription ? (
+            <p>{channelRecord.boardDescription}</p>
+          ) : (
+            <p className="workspace-board-muted">
+              설명이 아직 등록되지 않았습니다.
             </p>
-          </div>
-        ) : (
-          <ol className="message-list">
-            {channelItems.map((item) => {
+          )}
+        </div>
+        <nav className="workspace-nav" aria-label="채널">
+          <header className="workspace-nav-header">
+            <h2>채널</h2>
+            <p>총 {channelList.length}개</p>
+          </header>
+          {channelList.length === 0 ? (
+            <p className="workspace-nav-empty">아직 채널이 없습니다.</p>
+          ) : (
+            <ul className="workspace-nav-list">
+              {channelList.map((channel) => {
+                const isActive = channel.slug === channelRecord.channelSlug;
+
+                return (
+                  <li key={channel.id}>
+                    <Link
+                      href={`/${channelRecord.boardSlug}/${channel.slug}`}
+                      className="channel-link"
+                      data-active={isActive ? "true" : "false"}
+                    >
+                      <div className="channel-link-main">
+                        <span aria-hidden className="channel-link-hash">
+                          #
+                        </span>
+                        <span className="channel-link-name">{channel.name}</span>
+                        {channel.isDefault ? (
+                          <span className="channel-badge">기본</span>
+                        ) : null}
+                      </div>
+                      <span className="channel-link-slug">
+                        /{channelRecord.boardSlug}/{channel.slug}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </nav>
+      </aside>
+      <section className="workspace-content">
+        <div className="channel-view">
+          <header className="channel-header">
+            <div className="channel-heading">
+              <span aria-hidden className="channel-hash">
+                #
+              </span>
+              <h1>{channelRecord.channelName}</h1>
+            </div>
+            <p className="channel-subtitle">
+              {channelItems.length === 0
+                ? "아직 메시지가 없습니다."
+                : `총 ${channelItems.length}개 메시지`}
+            </p>
+          </header>
+          <div className="channel-scroll">
+            {channelItems.length === 0 ? (
+              <div className="channel-empty-state">
+                <h2>첫 메시지를 남겨보세요</h2>
+                <p>
+                  클립보드에서 붙여넣거나 파일을 드롭하면 이곳에 대화처럼 쌓입니다.
+                </p>
+              </div>
+            ) : (
+              <ol className="message-list">
+                {channelItems.map((item) => {
               const createdAtLabel = item.createdAt
                 ? item.createdAt.toLocaleString("ko-KR", {
                     dateStyle: "medium",
@@ -233,12 +308,14 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
             })}
           </ol>
         )}
-        <ChannelComposer
-          boardSlug={channelRecord.boardSlug}
-          channelSlug={channelRecord.channelSlug}
-          channelName={channelRecord.channelName}
-        />
+          <ChannelComposer
+            boardSlug={channelRecord.boardSlug}
+            channelSlug={channelRecord.channelSlug}
+            channelName={channelRecord.channelName}
+          />
+        </div>
       </div>
-    </div>
+    </section>
+  </div>
   );
 }
