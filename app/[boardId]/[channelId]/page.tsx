@@ -1,8 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 
@@ -10,6 +8,7 @@ import { db } from "@/db/client";
 import { boards, channels, items } from "@/db/schema";
 
 import { ChannelComposer } from "./channel-composer";
+import { renderMarkdownToHtml } from "@/lib/markdown";
 
 const ITEM_TYPE_LABELS: Record<"text" | "file" | "link", string> = {
   text: "텍스트",
@@ -124,6 +123,40 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
     .orderBy(asc(items.createdAt), asc(items.id))
     .all();
 
+  const renderedChannelItems = await Promise.all(
+    channelItems.map(async (item) => {
+      if (item.type === "text") {
+        const textContent = item.textMd ?? "";
+
+        if (textContent.trim().length === 0) {
+          return {
+            ...item,
+            textHtml: null,
+          };
+        }
+
+        try {
+          const html = await renderMarkdownToHtml(textContent);
+          return {
+            ...item,
+            textHtml: html,
+          };
+        } catch (error) {
+          console.error("Failed to render markdown", error);
+          return {
+            ...item,
+            textHtml: null,
+          };
+        }
+      }
+
+      return {
+        ...item,
+        textHtml: null,
+      };
+    }),
+  );
+
   return (
     <div className="workspace">
       <aside className="workspace-sidebar">
@@ -189,13 +222,13 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
               <h1>{channelRecord.channelName}</h1>
             </div>
             <p className="channel-subtitle">
-              {channelItems.length === 0
+              {renderedChannelItems.length === 0
                 ? "아직 메시지가 없습니다."
-                : `총 ${channelItems.length}개 메시지`}
+                : `총 ${renderedChannelItems.length}개 메시지`}
             </p>
           </header>
           <div className="channel-scroll">
-            {channelItems.length === 0 ? (
+            {renderedChannelItems.length === 0 ? (
               <div className="channel-empty-state">
                 <h2>첫 메시지를 남겨보세요</h2>
                 <p>
@@ -204,108 +237,93 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
               </div>
             ) : (
               <ol className="message-list">
-                {channelItems.map((item) => {
-              const createdAtLabel = item.createdAt
-                ? item.createdAt.toLocaleString("ko-KR", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })
-                : "시간 정보 없음";
-              const createdAtIso = item.createdAt
-                ? item.createdAt.toISOString()
-                : undefined;
+                {renderedChannelItems.map((item) => {
+                  const createdAtLabel = item.createdAt
+                    ? item.createdAt.toLocaleString("ko-KR", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : "시간 정보 없음";
+                  const createdAtIso = item.createdAt
+                    ? item.createdAt.toISOString()
+                    : undefined;
 
-              let body: ReactNode;
+                  let body: ReactNode;
 
-              if (item.type === "text") {
-                const textContent = item.textMd ?? "";
-                if (textContent.trim().length === 0) {
-                  body = (
-                    <p className="message-text message-text--muted">
-                      내용이 비어 있습니다.
-                    </p>
-                  );
-                } else {
-                  body = (
-                    <div className="message-text">
-                      <div className="message-markdown">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            a({ node: _node, ...props }) {
-                              return (
-                                <a
-                                  {...props}
-                                  target={props.target ?? "_blank"}
-                                  rel={props.rel ?? "noreferrer"}
-                                />
-                              );
-                            },
-                          }}
-                        >
-                          {textContent}
-                        </ReactMarkdown>
+                  if (item.type === "text") {
+                    if (!item.textHtml) {
+                      body = (
+                        <p className="message-text message-text--muted">
+                          내용이 비어 있습니다.
+                        </p>
+                      );
+                    } else {
+                      body = (
+                        <div className="message-text">
+                          <div
+                            className="message-markdown"
+                            dangerouslySetInnerHTML={{ __html: item.textHtml }}
+                          />
+                        </div>
+                      );
+                    }
+                  } else if (item.type === "link") {
+                    body = item.linkUrl ? (
+                      <div className="message-link">
+                        <a href={item.linkUrl} target="_blank" rel="noreferrer">
+                          {item.linkTitle ?? item.linkUrl}
+                        </a>
+                        {item.linkDesc ? <p>{item.linkDesc}</p> : null}
                       </div>
-                    </div>
-                  );
-                }
-              } else if (item.type === "link") {
-                body = item.linkUrl ? (
-                  <div className="message-link">
-                    <a href={item.linkUrl} target="_blank" rel="noreferrer">
-                      {item.linkTitle ?? item.linkUrl}
-                    </a>
-                    {item.linkDesc ? <p>{item.linkDesc}</p> : null}
-                  </div>
-                ) : (
-                  <p className="message-text message-text--muted">
-                    링크 정보가 아직 준비되지 않았습니다.
-                  </p>
-                );
-              } else {
-                body = (
-                  <p className="message-text message-text--muted">
-                    파일 메시지는 곧 미리보기를 지원할 예정입니다.
-                  </p>
-                );
-              }
+                    ) : (
+                      <p className="message-text message-text--muted">
+                        링크 정보가 아직 준비되지 않았습니다.
+                      </p>
+                    );
+                  } else {
+                    body = (
+                      <p className="message-text message-text--muted">
+                        파일 메시지는 곧 미리보기를 지원할 예정입니다.
+                      </p>
+                    );
+                  }
 
-              return (
-                <li key={item.id} className="message">
-                  <span
-                    aria-hidden
-                    className="message-avatar"
-                    data-type={item.type}
-                  >
-                    {ITEM_TYPE_ICONS[item.type]}
-                  </span>
-                  <div className="message-content">
-                    <div className="message-meta">
-                      <span className="message-author">익명</span>
-                      <span className="message-separator" aria-hidden>
-                        ·
+                  return (
+                    <li key={item.id} className="message">
+                      <span
+                        aria-hidden
+                        className="message-avatar"
+                        data-type={item.type}
+                      >
+                        {ITEM_TYPE_ICONS[item.type]}
                       </span>
-                      {createdAtIso ? (
-                        <time
-                          className="message-timestamp"
-                          dateTime={createdAtIso}
-                        >
-                          {createdAtLabel}
-                        </time>
-                      ) : (
-                        <span className="message-timestamp">
-                          {createdAtLabel}
-                        </span>
-                      )}
-                      <span className="message-type">
-                        {ITEM_TYPE_LABELS[item.type]}
-                      </span>
-                    </div>
-                    {body}
-                  </div>
-                </li>
-              );
-            })}
+                      <div className="message-content">
+                        <div className="message-meta">
+                          <span className="message-author">익명</span>
+                          <span className="message-separator" aria-hidden>
+                            ·
+                          </span>
+                          {createdAtIso ? (
+                            <time
+                              className="message-timestamp"
+                              dateTime={createdAtIso}
+                            >
+                              {createdAtLabel}
+                            </time>
+                          ) : (
+                            <span className="message-timestamp">
+                              {createdAtLabel}
+                            </span>
+                          )}
+                          <span className="message-type">
+                            {ITEM_TYPE_LABELS[item.type]}
+                          </span>
+                        </div>
+                        {body}
+                      </div>
+                    </li>
+                  );
+                })}
           </ol>
         )}
           <ChannelComposer
