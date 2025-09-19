@@ -4,6 +4,8 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { boards, channels } from "@/db/schema";
 
+import { BoardEmptyState } from "./_components/board-empty-state";
+
 type BoardPageProps = {
   params: {
     boardId: string;
@@ -60,5 +62,12 @@ export default async function BoardPage({ params }: BoardPageProps) {
     redirect(`/${boardRecord.slug}/${resolvedChannelSlug}`);
   }
 
-  return null;
+  const boardDisplayName = boardRecord.name ?? boardRecord.slug;
+
+  return (
+    <BoardEmptyState
+      boardDisplayName={boardDisplayName}
+      boardSlug={boardRecord.slug}
+    />
+  );
 }
