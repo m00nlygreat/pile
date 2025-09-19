@@ -153,14 +153,15 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
                 } else {
                   body = (
                     <div className="message-text">
-                      <ReactMarkdown
-                        className="message-markdown"
-                        remarkPlugins={[remarkGfm]}
-                        linkTarget="_blank"
-                        linkRel="noreferrer"
-                      >
-                        {textContent}
-                      </ReactMarkdown>
+                      <div className="message-markdown">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          linkTarget="_blank"
+                          linkRel="noreferrer"
+                        >
+                          {textContent}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                   );
                 }
