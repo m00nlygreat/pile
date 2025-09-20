@@ -7,6 +7,7 @@ import {
   getAdminDisplayName,
   getAdminPassword,
 } from "@/lib/admin";
+import { ensureAdminAnonUser, markAdminLastSeen } from "@/lib/admin-server";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,9 @@ export async function POST(request: NextRequest) {
   if (password !== expectedPassword) {
     return NextResponse.json({ error: "비밀번호가 올바르지 않습니다." }, { status: 401 });
   }
+
+  ensureAdminAnonUser();
+  markAdminLastSeen();
 
   const cookieValue = createAdminCookieValue();
   const response = NextResponse.json({ ok: true, adminName: getAdminDisplayName() });

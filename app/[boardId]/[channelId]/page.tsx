@@ -8,6 +8,7 @@ import { getBoardChannelContext } from "@/lib/board-data";
 import { getActiveAnonUserId, isAdminRequest } from "@/lib/anon-server";
 
 import DeleteItemButton from "./DeleteItemButton";
+import ChannelTabs from "./ChannelTabs";
 
 import PasteCapture from "./PasteCapture";
 
@@ -113,19 +114,12 @@ export default function BoardChannelPage({
         </aside>
       </header>
 
-      <nav className="channel-tabs" aria-label="채널 목록">
-        {context.channels.map((channel) => (
-          <a
-            key={channel.id}
-            href={`/${context.board.slug}/${channel.slug}`}
-            className={`channel-tab${
-              channel.id === context.activeChannel!.id ? " channel-tab-active" : ""
-            }`}
-          >
-            {channel.name}
-          </a>
-        ))}
-      </nav>
+      <ChannelTabs
+        boardSlug={context.board.slug}
+        channels={context.channels}
+        activeChannelId={context.activeChannel.id}
+        viewerIsAdmin={viewerIsAdmin}
+      />
 
       <section className="channel-body" aria-live="polite">
         <header className="channel-heading">

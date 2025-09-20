@@ -8,7 +8,9 @@ import { boards, channels, items, type Board, type Channel } from "@/db/schema";
 import { resolveSessionStart } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/uploads";
 import { fetchLinkMetadata } from "@/lib/og";
-import { getActiveAnonUserId } from "@/lib/anon-server";
+import { getActiveAnonUserId, isAdminRequest } from "@/lib/anon-server";
+import { ADMIN_ANON_ID } from "@/lib/admin";
+import { ensureAdminAnonUser, markAdminLastSeen } from "@/lib/admin-server";
 
 type RouteParams = {
   boardId: string;
@@ -36,13 +38,19 @@ export async function POST(
 ): Promise<NextResponse> {
   const contentType = request.headers.get("content-type") ?? "";
   const anonUserId = getActiveAnonUserId();
+  const viewerIsAdmin = isAdminRequest();
+  if (viewerIsAdmin) {
+    ensureAdminAnonUser();
+    markAdminLastSeen();
+  }
+  const authorAnonId = viewerIsAdmin ? ADMIN_ANON_ID : anonUserId;
 
   if (contentType.includes("multipart/form-data")) {
-    return handleFilePaste(request, params, anonUserId);
+    return handleFilePaste(request, params, authorAnonId);
   }
 
   if (contentType.includes("application/json")) {
-    return handleJsonPaste(request, params, anonUserId);
+    return handleJsonPaste(request, params, authorAnonId);
   }
 
   return NextResponse.json({ error: "지원하지 않는 요청 형식입니다." }, { status: 400 });

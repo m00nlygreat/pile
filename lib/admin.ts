@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const ADMIN_COOKIE_NAME = "is_admin";
 export const ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+export const ADMIN_ANON_ID = "admin";
 
 const ADMIN_COOKIE_VERSION = 1;
 const DEFAULT_ADMIN_NAME = "관리자";

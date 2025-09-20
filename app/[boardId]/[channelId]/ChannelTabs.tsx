@@ -1,0 +1,86 @@
+"use client";
+
+import { useState } from "react";
+
+import CreateChannelForm from "./CreateChannelForm";
+
+type ChannelInfo = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+export default function ChannelTabs({
+  boardSlug,
+  channels,
+  activeChannelId,
+  viewerIsAdmin,
+}: {
+  boardSlug: string;
+  channels: ChannelInfo[];
+  activeChannelId: string;
+  viewerIsAdmin: boolean;
+}) {
+  const [showModal, setShowModal] = useState(false);
+
+  return (
+    <>
+      <nav className="channel-tabs" aria-label="채널 목록">
+        {channels.map((channel) => (
+          <a
+            key={channel.id}
+            href={`/${boardSlug}/${channel.slug}`}
+            className={`channel-tab${channel.id === activeChannelId ? " channel-tab-active" : ""}`}
+          >
+            {channel.name}
+          </a>
+        ))}
+        {viewerIsAdmin ? (
+          <button
+            type="button"
+            className="channel-tab channel-tab-add"
+            onClick={() => setShowModal(true)}
+          >
+            + 새 채널
+          </button>
+        ) : null}
+      </nav>
+
+      {viewerIsAdmin && showModal ? (
+        <div
+          className="channel-modal-backdrop"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowModal(false)}
+        >
+          <div
+            className="channel-modal-card"
+            style={{
+              background: "var(--panel-bg, #fff)",
+              borderRadius: "16px",
+              padding: "24px",
+              maxWidth: "360px",
+              width: "90%",
+              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.15)",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CreateChannelForm
+              boardSlug={boardSlug}
+              className="panel"
+              onSuccess={() => setShowModal(false)}
+              onCancel={() => setShowModal(false)}
+            />
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
