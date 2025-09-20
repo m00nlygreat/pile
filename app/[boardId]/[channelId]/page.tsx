@@ -5,6 +5,9 @@ import { notFound } from "next/navigation";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import type { BoardChannelContext } from "@/lib/board-data";
 import { getBoardChannelContext } from "@/lib/board-data";
+import { getActiveAnonUserId, isAdminRequest } from "@/lib/anon-server";
+
+import DeleteItemButton from "./DeleteItemButton";
 
 import PasteCapture from "./PasteCapture";
 
@@ -29,6 +32,8 @@ type ItemViewModel = {
   sessionStart: Date | null;
   authorNickname: string | null;
   authorDisplayName: string | null;
+  ownerAnonId: string | null;
+  canDelete: boolean;
 };
 
 type SessionGroup = {
@@ -70,7 +75,13 @@ export default function BoardChannelPage({
     notFound();
   }
 
-  const sessionGroups = buildSessionGroups(context);
+  const viewerAnonId = getActiveAnonUserId();
+  const viewerIsAdmin = isAdminRequest();
+
+  const sessionGroups = buildSessionGroups(context, {
+    viewerAnonId,
+    viewerIsAdmin,
+  });
 
   return (
     <main className="board-shell">
@@ -139,11 +150,16 @@ export default function BoardChannelPage({
                 {group.items.map((item) => (
                   <article key={item.id} className={`item-card item-card-${item.type}`}>
                     <header className="item-meta">
-                      <span className="item-author">{resolveAuthorName(item)}</span>
-                      {item.createdAt ? (
-                        <time dateTime={item.createdAt.toISOString()}>
-                          {formatTimestamp(item.createdAt)}
-                        </time>
+                      <div className="item-meta-primary">
+                        <span className="item-author">{resolveAuthorName(item)}</span>
+                        {item.createdAt ? (
+                          <time dateTime={item.createdAt.toISOString()}>
+                            {formatTimestamp(item.createdAt)}
+                          </time>
+                        ) : null}
+                      </div>
+                      {item.canDelete ? (
+                        <DeleteItemButton itemId={item.id} />
                       ) : null}
                     </header>
                     {renderItemBody(item)}
@@ -158,10 +174,18 @@ export default function BoardChannelPage({
   );
 }
 
-function buildSessionGroups(context: BoardChannelContext): SessionGroup[] {
+function buildSessionGroups(
+  context: BoardChannelContext,
+  viewer: { viewerAnonId: string | null; viewerIsAdmin: boolean },
+): SessionGroup[] {
   const buckets = new Map<string, SessionGroup>();
 
   for (const record of context.items) {
+    const ownerAnonId = record.item.anonUserId ?? null;
+    const canDelete =
+      viewer.viewerIsAdmin ||
+      (viewer.viewerAnonId !== null && ownerAnonId !== null && viewer.viewerAnonId === ownerAnonId);
+
     const viewModel: ItemViewModel = {
       id: record.item.id,
       type: record.item.type,
@@ -178,6 +202,8 @@ function buildSessionGroups(context: BoardChannelContext): SessionGroup[] {
       sessionStart: record.item.sessionStart ?? null,
       authorNickname: record.author?.nickname ?? null,
       authorDisplayName: record.author?.displayName ?? null,
+      ownerAnonId,
+      canDelete,
     };
 
     const key = viewModel.sessionStart
