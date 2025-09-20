@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+export const ANON_COOKIE_NAME = "anon_id";
+
 const colors = [
   "푸른",
   "붉은",

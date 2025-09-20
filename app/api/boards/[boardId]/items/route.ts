@@ -1,14 +1,14 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { anonUsers, boards, channels, items, type Board, type Channel } from "@/db/schema";
+import { boards, channels, items, type Board, type Channel } from "@/db/schema";
 import { resolveSessionStart } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/uploads";
 import { fetchLinkMetadata } from "@/lib/og";
+import { getActiveAnonUserId } from "@/lib/anon-server";
 
 type RouteParams = {
   boardId: string;
@@ -27,7 +27,6 @@ type LinkPayload = {
 };
 
 const maxUploadBytes = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10)) * 1024 * 1024;
-const ANON_COOKIE_NAME = "anon_id";
 
 export const runtime = "nodejs";
 
@@ -36,7 +35,7 @@ export async function POST(
   { params }: { params: RouteParams },
 ): Promise<NextResponse> {
   const contentType = request.headers.get("content-type") ?? "";
-  const anonUserId = resolveAnonUserIdFromCookie();
+  const anonUserId = getActiveAnonUserId();
 
   if (contentType.includes("multipart/form-data")) {
     return handleFilePaste(request, params, anonUserId);
@@ -287,30 +286,4 @@ function sanitizeUrl(value: string | null | undefined): string | null {
   } catch (error) {
     return null;
   }
-}
-
-function resolveAnonUserIdFromCookie(): string | null {
-  const cookieValue = cookies().get(ANON_COOKIE_NAME)?.value ?? null;
-  if (!cookieValue) {
-    return null;
-  }
-
-  const [existing] = db
-    .select({ id: anonUsers.id })
-    .from(anonUsers)
-    .where(eq(anonUsers.id, cookieValue))
-    .limit(1)
-    .all();
-
-  if (!existing) {
-    return null;
-  }
-
-  db
-    .update(anonUsers)
-    .set({ lastSeenAt: new Date() })
-    .where(eq(anonUsers.id, existing.id))
-    .run();
-
-  return existing.id;
 }

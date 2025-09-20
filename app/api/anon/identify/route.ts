@@ -4,15 +4,14 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { anonUsers } from "@/db/schema";
-import { createAnonId, generateNickname, getAnonCookieExpiry } from "@/lib/anon";
+import { ANON_COOKIE_NAME, createAnonId, generateNickname, getAnonCookieExpiry } from "@/lib/anon";
 
-const COOKIE_NAME = "anon_id";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  const existingCookie = request.cookies.get(COOKIE_NAME)?.value ?? null;
+  const existingCookie = request.cookies.get(ANON_COOKIE_NAME)?.value ?? null;
   const now = new Date();
   let anonId = existingCookie;
 
@@ -39,7 +38,7 @@ export async function POST(request: NextRequest) {
 
       const expires = getAnonCookieExpiry();
       response.cookies.set({
-        name: COOKIE_NAME,
+        name: ANON_COOKIE_NAME,
         value: anonId,
         httpOnly: true,
         sameSite: "lax",
@@ -90,7 +89,7 @@ export async function POST(request: NextRequest) {
     });
 
   response.cookies.set({
-    name: COOKIE_NAME,
+    name: ANON_COOKIE_NAME,
     value: anonId,
     httpOnly: true,
     sameSite: "lax",
