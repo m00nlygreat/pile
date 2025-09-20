@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, max } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { boards, channels, items, type Board, type Channel } from "@/db/schema";
@@ -29,6 +29,11 @@ type LinkPayload = {
 };
 
 const maxUploadBytes = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10)) * 1024 * 1024;
+
+const DEFAULT_CHANNEL_SLUG = "default";
+const DEFAULT_CHANNEL_NAME = "공유";
+
+type DbExecutor = Pick<typeof db, "select" | "insert" | "update">;
 
 export const runtime = "nodejs";
 
@@ -240,36 +245,138 @@ function findBoardAndChannel(
   boardSlug: string,
   requestedChannelId?: string,
 ): { board: Board; channel: Channel } | null {
-  const board = findBoardBySlug(boardSlug);
-  if (!board) {
-    return null;
+  if (requestedChannelId && requestedChannelId.trim().length > 0) {
+    const board = findBoardBySlug(boardSlug);
+    if (!board) {
+      return null;
+    }
+
+    const channel = findChannelById(board.id, requestedChannelId);
+    if (!channel) {
+      return null;
+    }
+
+    return { board, channel };
   }
 
-  const targetChannelId =
-    typeof requestedChannelId === "string" && requestedChannelId.length > 0
-      ? requestedChannelId
-      : board.defaultChannelId ?? null;
+  return ensureBoardWithDefaultChannel(boardSlug);
+}
 
-  if (!targetChannelId) {
-    return null;
+function ensureBoardWithDefaultChannel(boardSlug: string): { board: Board; channel: Channel } | null {
+  return db.transaction((tx) => {
+    let [board] = tx
+      .select()
+      .from(boards)
+      .where(eq(boards.slug, boardSlug))
+      .limit(1)
+      .all();
+
+    if (!board) {
+      const boardId = randomUUID();
+      tx
+        .insert(boards)
+        .values({
+          id: boardId,
+          name: boardSlug,
+          slug: boardSlug,
+        })
+        .run();
+
+      [board] = tx
+        .select()
+        .from(boards)
+        .where(eq(boards.id, boardId))
+        .limit(1)
+        .all();
+    }
+
+    if (!board) {
+      return null;
+    }
+
+    const ensured = ensureDefaultChannel(tx, board);
+    return ensured;
+  });
+}
+
+function ensureDefaultChannel(
+  tx: DbExecutor,
+  board: Board,
+): { board: Board; channel: Channel } {
+  let channel: Channel | null = null;
+
+  if (board.defaultChannelId) {
+    channel = findChannelById(board.id, board.defaultChannelId, tx);
   }
-
-  const [channel] = db
-    .select()
-    .from(channels)
-    .where(and(eq(channels.boardId, board.id), eq(channels.id, targetChannelId)))
-    .limit(1)
-    .all();
 
   if (!channel) {
-    return null;
+    channel = findChannelBySlug(board.id, DEFAULT_CHANNEL_SLUG, tx);
+  }
+
+  if (!channel) {
+    const [{ maxOrder }] = tx
+      .select({ maxOrder: max(channels.orderIndex).as("maxOrder") })
+      .from(channels)
+      .where(eq(channels.boardId, board.id))
+      .all();
+
+    const orderIndex = typeof maxOrder === "number" ? maxOrder + 1 : 0;
+    const channelId = randomUUID();
+
+    tx
+      .insert(channels)
+      .values({
+        id: channelId,
+        boardId: board.id,
+        name: DEFAULT_CHANNEL_NAME,
+        slug: DEFAULT_CHANNEL_SLUG,
+        orderIndex,
+      })
+      .run();
+
+    [channel] = tx
+      .select()
+      .from(channels)
+      .where(and(eq(channels.boardId, board.id), eq(channels.id, channelId)))
+      .limit(1)
+      .all();
+
+    if (!channel) {
+      throw new Error("Failed to create default channel for board");
+    }
+
+    if (!board.defaultChannelId) {
+      tx
+        .update(boards)
+        .set({ defaultChannelId: channel.id })
+        .where(eq(boards.id, board.id))
+        .run();
+
+      board = {
+        ...board,
+        defaultChannelId: channel.id,
+      };
+    }
+  }
+
+  if (!board.defaultChannelId) {
+    tx
+      .update(boards)
+      .set({ defaultChannelId: channel.id })
+      .where(eq(boards.id, board.id))
+      .run();
+
+    board = {
+      ...board,
+      defaultChannelId: channel.id,
+    };
   }
 
   return { board, channel };
 }
 
-function findBoardBySlug(slug: string): Board | null {
-  const [board] = db
+function findBoardBySlug(slug: string, client: DbExecutor = db): Board | null {
+  const [board] = client
     .select()
     .from(boards)
     .where(eq(boards.slug, slug))
@@ -277,6 +384,36 @@ function findBoardBySlug(slug: string): Board | null {
     .all();
 
   return board ?? null;
+}
+
+function findChannelById(
+  boardId: string,
+  channelId: string,
+  client: DbExecutor = db,
+): Channel | null {
+  const [channel] = client
+    .select()
+    .from(channels)
+    .where(and(eq(channels.boardId, boardId), eq(channels.id, channelId)))
+    .limit(1)
+    .all();
+
+  return channel ?? null;
+}
+
+function findChannelBySlug(
+  boardId: string,
+  slug: string,
+  client: DbExecutor = db,
+): Channel | null {
+  const [channel] = client
+    .select()
+    .from(channels)
+    .where(and(eq(channels.boardId, boardId), eq(channels.slug, slug)))
+    .limit(1)
+    .all();
+
+  return channel ?? null;
 }
 
 function sanitizeUrl(value: string | null | undefined): string | null {

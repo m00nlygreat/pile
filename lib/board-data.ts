@@ -22,12 +22,13 @@ export type BoardChannelContext = {
   channels: Channel[];
   activeChannel: Channel | null;
   items: ChannelItemRecord[];
+  boardExists: boolean;
 };
 
 export function getBoardChannelContext(
   boardSlug: string,
-  channelSlug: string,
-): BoardChannelContext | null {
+  channelSlug?: string | null,
+): BoardChannelContext {
   const [board] = db
     .select()
     .from(boards)
@@ -36,7 +37,13 @@ export function getBoardChannelContext(
     .all();
 
   if (!board) {
-    return null;
+    return {
+      board: createPlaceholderBoard(boardSlug),
+      channels: [],
+      activeChannel: null,
+      items: [],
+      boardExists: false,
+    };
   }
 
   const boardChannels = db
@@ -46,7 +53,16 @@ export function getBoardChannelContext(
     .orderBy(asc(channels.orderIndex), asc(channels.createdAt))
     .all();
 
-  const activeChannel = boardChannels.find((channel) => channel.slug === channelSlug) ?? null;
+  let activeChannel: Channel | null = null;
+
+  if (channelSlug) {
+    activeChannel = boardChannels.find((channel) => channel.slug === channelSlug) ?? null;
+  } else if (board.defaultChannelId) {
+    activeChannel =
+      boardChannels.find((channel) => channel.id === board.defaultChannelId) ?? boardChannels.at(0) ?? null;
+  } else {
+    activeChannel = boardChannels.at(0) ?? null;
+  }
 
   const channelItems = activeChannel
     ? db
@@ -63,5 +79,22 @@ export function getBoardChannelContext(
     channels: boardChannels,
     activeChannel,
     items: channelItems,
+    boardExists: true,
   };
+}
+
+function createPlaceholderBoard(slug: string): Board {
+  const fallbackName = slug.trim().length > 0 ? slug : "새 보드";
+
+  return {
+    id: `virtual-${slug}`,
+    name: fallbackName,
+    slug,
+    description: null,
+    defaultChannelId: null,
+    sessionBlockMinutes: 60,
+    sessionAnchor: "00:00",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } satisfies Board;
 }

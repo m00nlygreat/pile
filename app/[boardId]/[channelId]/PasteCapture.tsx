@@ -7,7 +7,7 @@ const successTimeoutMs = 1800;
 
 type PasteCaptureProps = {
   boardSlug: string;
-  channelId: string;
+  channelId?: string | null;
 };
 
 type PasteStatus = "idle" | "posting" | "success" | "error";
@@ -15,11 +15,15 @@ type PasteStatus = "idle" | "posting" | "success" | "error";
 export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps) {
   const router = useRouter();
   const [status, setStatus] = useState<PasteStatus>("idle");
-  const [message, setMessage] = useState(
-    "이 채널에서 붙여넣으면 즉시 아이템이 생성됩니다.",
-  );
+  const [message, setMessage] = useState(getIdleMessage(channelId));
   const isPostingRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (status === "idle") {
+      setMessage(getIdleMessage(channelId));
+    }
+  }, [channelId, status]);
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
@@ -71,11 +75,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            type: "text",
-            text: content,
-            channelId,
-          }),
+          body: JSON.stringify(buildJsonPayload({ type: "text", text: content, channelId })),
         });
 
         if (!response.ok) {
@@ -112,11 +112,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            type: "link",
-            url: preparedUrl,
-            channelId,
-          }),
+          body: JSON.stringify(buildJsonPayload({ type: "link", url: preparedUrl, channelId })),
         });
 
         if (!response.ok) {
@@ -146,7 +142,9 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
 
       const formData = new FormData();
       formData.append("type", "file");
-      formData.append("channelId", channelId);
+      if (channelId) {
+        formData.append("channelId", channelId);
+      }
 
       const fileName = deriveFileName(file);
       formData.append("file", file, fileName);
@@ -185,7 +183,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
 
         timeoutRef.current = setTimeout(() => {
           setStatus("idle");
-          setMessage("다음 붙여넣기도 곧바로 등록됩니다.");
+          setMessage(getIdleMessage(channelId));
           timeoutRef.current = null;
         }, successTimeoutMs);
       }
@@ -207,6 +205,23 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       {message}
     </div>
   );
+}
+
+function getIdleMessage(channelId?: string | null): string {
+  if (channelId) {
+    return "이 채널에서 붙여넣으면 즉시 아이템이 생성됩니다.";
+  }
+
+  return "이 보드에서 붙여넣으면 기본 채널이 만들어지고 아이템이 추가됩니다.";
+}
+
+function buildJsonPayload(
+  payload:
+    | { type: "text"; text: string; channelId?: string | null }
+    | { type: "link"; url: string; channelId?: string | null },
+): Record<string, unknown> {
+  const { channelId, ...rest } = payload;
+  return channelId ? { ...rest, channelId } : rest;
 }
 
 function shouldIgnorePasteTarget(): boolean {

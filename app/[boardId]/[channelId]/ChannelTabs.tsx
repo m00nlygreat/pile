@@ -15,27 +15,35 @@ export default function ChannelTabs({
   channels,
   activeChannelId,
   viewerIsAdmin,
+  boardExists,
 }: {
   boardSlug: string;
   channels: ChannelInfo[];
-  activeChannelId: string;
+  activeChannelId?: string | null;
   viewerIsAdmin: boolean;
+  boardExists: boolean;
 }) {
   const [showModal, setShowModal] = useState(false);
 
   return (
     <>
       <nav className="channel-tabs" aria-label="채널 목록">
-        {channels.map((channel) => (
-          <a
-            key={channel.id}
-            href={`/${boardSlug}/${channel.slug}`}
-            className={`channel-tab${channel.id === activeChannelId ? " channel-tab-active" : ""}`}
-          >
-            {channel.name}
-          </a>
-        ))}
-        {viewerIsAdmin ? (
+        {channels.length === 0 ? (
+          <span className="channel-tab channel-tab-empty" aria-disabled="true">
+            채널이 아직 없습니다.
+          </span>
+        ) : (
+          channels.map((channel) => (
+            <a
+              key={channel.id}
+              href={`/${boardSlug}/${channel.slug}`}
+              className={`channel-tab${channel.id === activeChannelId ? " channel-tab-active" : ""}`}
+            >
+              {channel.name}
+            </a>
+          ))
+        )}
+        {viewerIsAdmin && boardExists ? (
           <button
             type="button"
             className="channel-tab channel-tab-add"
@@ -46,7 +54,7 @@ export default function ChannelTabs({
         ) : null}
       </nav>
 
-      {viewerIsAdmin && showModal ? (
+      {viewerIsAdmin && boardExists && showModal ? (
         <div
           className="channel-modal-backdrop"
           style={{
