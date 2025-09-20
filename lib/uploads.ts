@@ -75,7 +75,7 @@ function sanitizeFilename(name: string | undefined): string {
 function deriveOriginalFilename(file: File, extension: string): string {
   const rawName = typeof file.name === "string" ? file.name.trim() : "";
   if (rawName.length > 0) {
-    return rawName.slice(0, 120);
+    return rawName.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120);
   }
 
   return `clipboard${extension}`;

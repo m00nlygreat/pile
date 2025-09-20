@@ -48,6 +48,12 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
         return;
       }
 
+      if (isLikelyUrl(normalized)) {
+        event.preventDefault();
+        void submitLink(normalized);
+        return;
+      }
+
       void submitText(normalized);
     }
 
@@ -81,6 +87,47 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
         }
 
         updateStatus("success", "텍스트가 업로드되었어요.");
+        router.refresh();
+      } catch (error) {
+        updateStatus("error", "네트워크 오류가 발생했습니다.");
+      } finally {
+        isPostingRef.current = false;
+      }
+    }
+
+    async function submitLink(urlValue: string) {
+      if (isPostingRef.current) {
+        return;
+      }
+
+      isPostingRef.current = true;
+      updateStatus("posting", "붙여넣은 링크를 분석하는 중입니다...");
+
+      const preparedUrl =
+        /^https?:\/\//i.test(urlValue) ? urlValue : `https://${urlValue.replace(/^\/*/, "")}`;
+
+      try {
+        const response = await fetch(`/api/boards/${boardSlug}/items`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: "link",
+            url: preparedUrl,
+            channelId,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          updateStatus("error", data?.error ?? "링크 업로드에 실패했습니다.");
+          return;
+        }
+
+        updateStatus("success", "링크가 업로드되었어요.");
         router.refresh();
       } catch (error) {
         updateStatus("error", "네트워크 오류가 발생했습니다.");
@@ -178,6 +225,23 @@ function shouldIgnorePasteTarget(): boolean {
   }
 
   if (active.isContentEditable) {
+    return true;
+  }
+
+  return false;
+}
+
+function isLikelyUrl(value: string): boolean {
+  if (!value || value.length > 2048) {
+    return false;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return true;
+  }
+
+  // Allow URLs without protocol but with www.
+  if (/^www\.[^\s]+\.[a-z]{2,}$/i.test(value)) {
     return true;
   }
 

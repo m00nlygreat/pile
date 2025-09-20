@@ -251,6 +251,7 @@ function renderItemBody(item: ItemViewModel) {
 
   if (item.type === "link") {
     const linkLabel = item.linkTitle?.trim().length ? item.linkTitle : item.linkUrl;
+    const hostname = item.linkUrl ? safeHostname(item.linkUrl) : null;
 
     return (
       <div className="item-body">
@@ -261,6 +262,10 @@ function renderItemBody(item: ItemViewModel) {
         ) : (
           <span className="item-body-muted">링크 정보가 없습니다.</span>
         )}
+        {hostname ? <span className="item-subtext">{hostname}</span> : null}
+        {item.linkImage ? (
+          <img src={item.linkImage} alt={linkLabel ?? "링크 이미지"} className="item-link-preview" />
+        ) : null}
         {item.linkDesc ? <p className="item-subtext">{item.linkDesc}</p> : null}
       </div>
     );
@@ -338,4 +343,13 @@ function formatFileSize(bytes: number): string {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function safeHostname(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname;
+  } catch (error) {
+    return null;
+  }
 }

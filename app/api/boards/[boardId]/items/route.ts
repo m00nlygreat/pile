@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import { boards, channels, items, type Board, type Channel } from "@/db/schema";
 import { resolveSessionStart } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/uploads";
+import { fetchLinkMetadata } from "@/lib/og";
 
 type RouteParams = {
   boardId: string;
@@ -15,6 +16,12 @@ type RouteParams = {
 type TextPayload = {
   type: "text";
   text: string;
+  channelId?: string;
+};
+
+type LinkPayload = {
+  type: "link";
+  url: string;
   channelId?: string;
 };
 
@@ -31,28 +38,40 @@ export async function POST(
   }
 
   if (contentType.includes("application/json")) {
-    return handleTextPaste(request, params);
+    return handleJsonPaste(request, params);
   }
 
   return NextResponse.json({ error: "지원하지 않는 요청 형식입니다." }, { status: 400 });
 }
 
-async function handleTextPaste(
+async function handleJsonPaste(
   request: Request,
   params: RouteParams,
 ): Promise<NextResponse> {
-  let payload: TextPayload;
+  let payload: TextPayload | LinkPayload;
 
   try {
-    payload = (await request.json()) as TextPayload;
+    payload = (await request.json()) as TextPayload | LinkPayload;
   } catch (error) {
     return NextResponse.json({ error: "잘못된 요청 본문입니다." }, { status: 400 });
   }
 
-  if (!payload || payload.type !== "text") {
+  if (!payload || typeof payload !== "object") {
     return NextResponse.json({ error: "지원하지 않는 아이템 형식입니다." }, { status: 400 });
   }
 
+  if (payload.type === "text") {
+    return handleTextPayload(payload, params);
+  }
+
+  if (payload.type === "link") {
+    return handleLinkPayload(payload, params);
+  }
+
+  return NextResponse.json({ error: "지원하지 않는 아이템 형식입니다." }, { status: 400 });
+}
+
+async function handleTextPayload(payload: TextPayload, params: RouteParams): Promise<NextResponse> {
   const rawText = typeof payload.text === "string" ? payload.text : "";
   const normalizedText = rawText.replace(/\r\n/g, "\n");
   const textMd = normalizedText.trim();
@@ -61,24 +80,19 @@ async function handleTextPaste(
     return NextResponse.json({ error: "내용이 비어 있습니다." }, { status: 400 });
   }
 
-  const board = findBoardBySlug(params.boardId);
-  if (!board) {
-    return NextResponse.json({ error: "보드를 찾을 수 없습니다." }, { status: 404 });
+  const context = findBoardAndChannel(params.boardId, payload.channelId);
+  if (!context) {
+    return NextResponse.json({ error: "보드 또는 채널을 찾을 수 없습니다." }, { status: 404 });
   }
 
-  const channel = findChannelForBoard(board, payload.channelId);
-  if (!channel) {
-    return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
-  }
-
-  const sessionStart = resolveSessionStart(board);
+  const sessionStart = resolveSessionStart(context.board);
   const itemId = randomUUID();
 
   db.insert(items)
     .values({
       id: itemId,
-      boardId: board.id,
-      channelId: channel.id,
+      boardId: context.board.id,
+      channelId: context.channel.id,
       type: "text",
       textMd,
       sessionStart,
@@ -86,6 +100,48 @@ async function handleTextPaste(
     .run();
 
   return NextResponse.json({ ok: true, itemId }, { status: 201 });
+}
+
+async function handleLinkPayload(payload: LinkPayload, params: RouteParams): Promise<NextResponse> {
+  const sanitizedUrl = sanitizeUrl(payload.url);
+  if (!sanitizedUrl) {
+    return NextResponse.json({ error: "유효한 링크가 아닙니다." }, { status: 400 });
+  }
+
+  const context = findBoardAndChannel(params.boardId, payload.channelId);
+  if (!context) {
+    return NextResponse.json({ error: "보드 또는 채널을 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  const metadata = await fetchLinkMetadata(sanitizedUrl);
+  const sessionStart = resolveSessionStart(context.board);
+  const itemId = randomUUID();
+
+  db.insert(items)
+    .values({
+      id: itemId,
+      boardId: context.board.id,
+      channelId: context.channel.id,
+      type: "link",
+      linkUrl: sanitizedUrl,
+      linkTitle: metadata.title,
+      linkDesc: metadata.description,
+      linkImage: metadata.image,
+      sessionStart,
+    })
+    .run();
+
+  return NextResponse.json(
+    {
+      ok: true,
+      itemId,
+      linkUrl: sanitizedUrl,
+      linkTitle: metadata.title,
+      linkDesc: metadata.description,
+      linkImage: metadata.image,
+    },
+    { status: 201 },
+  );
 }
 
 async function handleFilePaste(
@@ -121,28 +177,21 @@ async function handleFilePaste(
     );
   }
 
-  const board = findBoardBySlug(params.boardId);
-  if (!board) {
-    return NextResponse.json({ error: "보드를 찾을 수 없습니다." }, { status: 404 });
-  }
+  const context = findBoardAndChannel(params.boardId, typeof channelIdField === "string" ? channelIdField : undefined);
 
-  const channelIdField = formData.get("channelId");
-  const channelId = typeof channelIdField === "string" ? channelIdField : undefined;
-  const channel = findChannelForBoard(board, channelId);
-
-  if (!channel) {
-    return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
+  if (!context) {
+    return NextResponse.json({ error: "보드 또는 채널을 찾을 수 없습니다." }, { status: 404 });
   }
 
   const saved = await saveUploadedFile(fileEntry);
-  const sessionStart = resolveSessionStart(board);
+  const sessionStart = resolveSessionStart(context.board);
   const itemId = randomUUID();
 
   db.insert(items)
     .values({
       id: itemId,
-      boardId: board.id,
-      channelId: channel.id,
+      boardId: context.board.id,
+      channelId: context.channel.id,
       type: "file",
       filePath: saved.relativePath,
       fileMime: saved.mimeType,
@@ -158,18 +207,15 @@ async function handleFilePaste(
   );
 }
 
-function findBoardBySlug(slug: string): Board | null {
-  const [board] = db
-    .select()
-    .from(boards)
-    .where(eq(boards.slug, slug))
-    .limit(1)
-    .all();
+function findBoardAndChannel(
+  boardSlug: string,
+  requestedChannelId?: string,
+): { board: Board; channel: Channel } | null {
+  const board = findBoardBySlug(boardSlug);
+  if (!board) {
+    return null;
+  }
 
-  return board ?? null;
-}
-
-function findChannelForBoard(board: Board, requestedChannelId?: string): Channel | null {
   const targetChannelId =
     typeof requestedChannelId === "string" && requestedChannelId.length > 0
       ? requestedChannelId
@@ -186,5 +232,37 @@ function findChannelForBoard(board: Board, requestedChannelId?: string): Channel
     .limit(1)
     .all();
 
-  return channel ?? null;
+  if (!channel) {
+    return null;
+  }
+
+  return { board, channel };
+}
+
+function findBoardBySlug(slug: string): Board | null {
+  const [board] = db
+    .select()
+    .from(boards)
+    .where(eq(boards.slug, slug))
+    .limit(1)
+    .all();
+
+  return board ?? null;
+}
+
+function sanitizeUrl(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    url.hash = "";
+    return url.toString();
+  } catch (error) {
+    return null;
+  }
 }
