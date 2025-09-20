@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { boards, channels, items } from "@/db/schema";
+import { boards, channels, items, type Board, type Channel } from "@/db/schema";
 import { resolveSessionStart } from "@/lib/session";
+import { saveUploadedFile } from "@/lib/uploads";
 
 type RouteParams = {
   boardId: string;
@@ -17,16 +18,33 @@ type TextPayload = {
   channelId?: string;
 };
 
-type CreateItemPayload = TextPayload;
+const maxUploadBytes = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10)) * 1024 * 1024;
 
 export async function POST(
   request: Request,
   { params }: { params: RouteParams },
 ): Promise<NextResponse> {
-  let payload: CreateItemPayload;
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    return handleFilePaste(request, params);
+  }
+
+  if (contentType.includes("application/json")) {
+    return handleTextPaste(request, params);
+  }
+
+  return NextResponse.json({ error: "지원하지 않는 요청 형식입니다." }, { status: 400 });
+}
+
+async function handleTextPaste(
+  request: Request,
+  params: RouteParams,
+): Promise<NextResponse> {
+  let payload: TextPayload;
 
   try {
-    payload = (await request.json()) as CreateItemPayload;
+    payload = (await request.json()) as TextPayload;
   } catch (error) {
     return NextResponse.json({ error: "잘못된 요청 본문입니다." }, { status: 400 });
   }
@@ -43,41 +61,22 @@ export async function POST(
     return NextResponse.json({ error: "내용이 비어 있습니다." }, { status: 400 });
   }
 
-  const board = db
-    .select()
-    .from(boards)
-    .where(eq(boards.slug, params.boardId))
-    .limit(1)
-    .all()[0];
-
+  const board = findBoardBySlug(params.boardId);
   if (!board) {
     return NextResponse.json({ error: "보드를 찾을 수 없습니다." }, { status: 404 });
   }
 
-  let channelId = typeof payload.channelId === "string" && payload.channelId.length > 0
-    ? payload.channelId
-    : board.defaultChannelId ?? null;
-
-  if (!channelId) {
-    return NextResponse.json({ error: "채널 정보를 확인할 수 없습니다." }, { status: 400 });
-  }
-
-  const channel = db
-    .select()
-    .from(channels)
-    .where(and(eq(channels.boardId, board.id), eq(channels.id, channelId)))
-    .limit(1)
-    .all()[0];
-
+  const channel = findChannelForBoard(board, payload.channelId);
   if (!channel) {
     return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
   }
 
   const sessionStart = resolveSessionStart(board);
+  const itemId = randomUUID();
 
   db.insert(items)
     .values({
-      id: randomUUID(),
+      id: itemId,
       boardId: board.id,
       channelId: channel.id,
       type: "text",
@@ -86,5 +85,102 @@ export async function POST(
     })
     .run();
 
-  return NextResponse.json({ ok: true }, { status: 201 });
+  return NextResponse.json({ ok: true, itemId }, { status: 201 });
+}
+
+async function handleFilePaste(
+  request: Request,
+  params: RouteParams,
+): Promise<NextResponse> {
+  const formData = await request.formData();
+  const typeField = formData.get("type");
+
+  if (typeof typeField !== "string" || typeField !== "file") {
+    return NextResponse.json({ error: "지원하지 않는 아이템 형식입니다." }, { status: 400 });
+  }
+
+  const fileEntry = formData.get("file");
+  if (!(fileEntry instanceof File)) {
+    return NextResponse.json({ error: "이미지를 찾을 수 없습니다." }, { status: 400 });
+  }
+
+  if (fileEntry.size === 0) {
+    return NextResponse.json({ error: "비어 있는 파일은 업로드할 수 없습니다." }, { status: 400 });
+  }
+
+  const fileType = (fileEntry.type || "").toLowerCase();
+
+  if (!fileType.startsWith("image/")) {
+    return NextResponse.json({ error: "이미지 파일만 붙여넣기 업로드가 가능합니다." }, { status: 400 });
+  }
+
+  if (fileEntry.size > maxUploadBytes) {
+    return NextResponse.json(
+      { error: `이미지는 최대 ${(maxUploadBytes / (1024 * 1024)).toFixed(0)}MB까지 업로드할 수 있습니다.` },
+      { status: 413 },
+    );
+  }
+
+  const board = findBoardBySlug(params.boardId);
+  if (!board) {
+    return NextResponse.json({ error: "보드를 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  const channelIdField = formData.get("channelId");
+  const channelId = typeof channelIdField === "string" ? channelIdField : undefined;
+  const channel = findChannelForBoard(board, channelId);
+
+  if (!channel) {
+    return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  const saved = await saveUploadedFile(fileEntry);
+  const sessionStart = resolveSessionStart(board);
+  const itemId = randomUUID();
+
+  db.insert(items)
+    .values({
+      id: itemId,
+      boardId: board.id,
+      channelId: channel.id,
+      type: "file",
+      filePath: saved.relativePath,
+      fileMime: saved.mimeType,
+      fileSize: saved.size,
+      sessionStart,
+    })
+    .run();
+
+  return NextResponse.json({ ok: true, itemId, filePath: saved.relativePath }, { status: 201 });
+}
+
+function findBoardBySlug(slug: string): Board | null {
+  const [board] = db
+    .select()
+    .from(boards)
+    .where(eq(boards.slug, slug))
+    .limit(1)
+    .all();
+
+  return board ?? null;
+}
+
+function findChannelForBoard(board: Board, requestedChannelId?: string): Channel | null {
+  const targetChannelId =
+    typeof requestedChannelId === "string" && requestedChannelId.length > 0
+      ? requestedChannelId
+      : board.defaultChannelId ?? null;
+
+  if (!targetChannelId) {
+    return null;
+  }
+
+  const [channel] = db
+    .select()
+    .from(channels)
+    .where(and(eq(channels.boardId, board.id), eq(channels.id, targetChannelId)))
+    .limit(1)
+    .all();
+
+  return channel ?? null;
 }

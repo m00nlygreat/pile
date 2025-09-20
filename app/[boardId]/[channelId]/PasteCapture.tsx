@@ -16,7 +16,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
   const router = useRouter();
   const [status, setStatus] = useState<PasteStatus>("idle");
   const [message, setMessage] = useState(
-    "이 채널에서 텍스트를 붙여넣으면 즉시 아이템이 생성됩니다.",
+    "이 채널에서 붙여넣으면 즉시 아이템이 생성됩니다.",
   );
   const isPostingRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -25,6 +25,20 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
     function handlePaste(event: ClipboardEvent) {
       if (shouldIgnorePasteTarget()) {
         return;
+      }
+
+      const clipboardItems = Array.from(event.clipboardData?.items ?? []);
+      const imageItem = clipboardItems.find(
+        (item) => item.kind === "file" && item.type.toLowerCase().startsWith("image/"),
+      );
+
+      if (imageItem) {
+        const file = imageItem.getAsFile();
+        if (file) {
+          event.preventDefault();
+          void submitImage(file);
+          return;
+        }
       }
 
       const text = event.clipboardData?.getData("text/plain") ?? "";
@@ -75,6 +89,44 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       }
     }
 
+    async function submitImage(file: File) {
+      if (isPostingRef.current) {
+        return;
+      }
+
+      isPostingRef.current = true;
+      updateStatus("posting", "붙여넣은 이미지를 업로드하는 중입니다...");
+
+      const formData = new FormData();
+      formData.append("type", "file");
+      formData.append("channelId", channelId);
+
+      const fileName = deriveFileName(file);
+      formData.append("file", file, fileName);
+
+      try {
+        const response = await fetch(`/api/boards/${boardSlug}/items`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          updateStatus("error", data?.error ?? "이미지 업로드에 실패했습니다.");
+          return;
+        }
+
+        updateStatus("success", "이미지가 업로드되었어요.");
+        router.refresh();
+      } catch (error) {
+        updateStatus("error", "네트워크 오류가 발생했습니다.");
+      } finally {
+        isPostingRef.current = false;
+      }
+    }
+
     function updateStatus(nextStatus: PasteStatus, nextMessage: string) {
       setStatus(nextStatus);
       setMessage(nextMessage);
@@ -86,7 +138,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
 
         timeoutRef.current = setTimeout(() => {
           setStatus("idle");
-          setMessage("다음 텍스트를 붙여넣으면 또 바로 등록됩니다.");
+          setMessage("다음 붙여넣기도 곧바로 등록됩니다.");
           timeoutRef.current = null;
         }, successTimeoutMs);
       }
@@ -130,4 +182,34 @@ function shouldIgnorePasteTarget(): boolean {
   }
 
   return false;
+}
+
+function deriveFileName(file: File): string {
+  if (file.name && file.name.trim().length > 0) {
+    return file.name;
+  }
+
+  const mime = (file.type || "").toLowerCase();
+
+  if (mime === "image/png") {
+    return `clipboard-${Date.now()}.png`;
+  }
+
+  if (mime === "image/jpeg" || mime === "image/jpg") {
+    return `clipboard-${Date.now()}.jpg`;
+  }
+
+  if (mime === "image/gif") {
+    return `clipboard-${Date.now()}.gif`;
+  }
+
+  if (mime === "image/webp") {
+    return `clipboard-${Date.now()}.webp`;
+  }
+
+  if (mime === "image/svg+xml") {
+    return `clipboard-${Date.now()}.svg`;
+  }
+
+  return `clipboard-${Date.now()}.png`;
 }

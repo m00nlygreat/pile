@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+/* eslint-disable @next/next/no-img-element */
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import type { BoardChannelContext } from "@/lib/board-data";
 import { getBoardChannelContext } from "@/lib/board-data";
@@ -264,19 +265,23 @@ function renderItemBody(item: ItemViewModel) {
   }
 
   const fileLabel = item.filePath?.split("/").at(-1) ?? "파일";
+  const downloadPath = buildFileHref(item.filePath);
 
   return (
     <div className="item-body">
-      {item.filePath ? (
-        <a href={item.filePath} download>
+      {downloadPath ? (
+        <a href={downloadPath} download>
           {fileLabel}
         </a>
       ) : (
         <span className="item-body-muted">파일 경로가 없습니다.</span>
       )}
+      {item.fileMime?.startsWith("image/") && downloadPath ? (
+        <img src={downloadPath} alt={fileLabel} className="item-image-preview" />
+      ) : null}
       <p className="item-subtext">
         {item.fileMime ?? "알 수 없는 형식"}
-        {item.fileSize ? ` · ${(item.fileSize / (1024 * 1024)).toFixed(2)} MB` : ""}
+        {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
       </p>
     </div>
   );
@@ -305,4 +310,30 @@ function formatTime(date: Date): string {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${hour}:${minute}`;
+}
+
+function buildFileHref(filePath: string | null): string | null {
+  if (!filePath) {
+    return null;
+  }
+
+  const trimmed = filePath.replace(/^\/+/, "");
+  const normalized = trimmed.replace(/^uploads\//, "");
+  if (!normalized) {
+    return null;
+  }
+
+  return `/api/uploads/${normalized}`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
