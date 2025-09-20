@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { anonUsers } from "@/db/schema";
 import { ANON_COOKIE_NAME } from "@/lib/anon";
+import { ADMIN_COOKIE_NAME, verifyAdminCookie } from "@/lib/admin";
 
 export function getActiveAnonUserId(): string | null {
   const cookieValue = cookies().get(ANON_COOKIE_NAME)?.value ?? null;
@@ -32,6 +33,6 @@ export function getActiveAnonUserId(): string | null {
 }
 
 export function isAdminRequest(): boolean {
-  const value = cookies().get("is_admin")?.value ?? null;
-  return value === "true";
+  const value = cookies().get(ADMIN_COOKIE_NAME)?.value ?? null;
+  return verifyAdminCookie(value);
 }

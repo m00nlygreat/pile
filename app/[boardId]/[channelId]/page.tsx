@@ -105,6 +105,10 @@ export default function BoardChannelPage({
               <dt>현재 채널</dt>
               <dd>{context.activeChannel.name}</dd>
             </div>
+            <div>
+              <dt>권한</dt>
+              <dd>{viewerIsAdmin ? "관리자" : "참여자"}</dd>
+            </div>
           </dl>
         </aside>
       </header>
