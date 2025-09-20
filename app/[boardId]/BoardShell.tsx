@@ -93,7 +93,7 @@ export default function BoardShell({
                     <div className="item-meta-primary">
                       <span className="item-author">{resolveAuthorName(item)}</span>
                       {item.createdAt ? (
-                        <time dateTime={item.createdAt.toISOString()}>{formatTimestamp(item.createdAt)}</time>
+                        <time dateTime={item.createdAt.toISOString()}>{formatRelativeTime(item.createdAt)}</time>
                       ) : null}
                     </div>
                     {item.canDelete ? <DeleteItemButton itemId={item.id} /> : null}
@@ -213,19 +213,23 @@ function renderItemBody(item: ItemViewModel) {
     const hostname = item.linkUrl ? safeHostname(item.linkUrl) : null;
 
     return (
-      <div className="item-body">
-        {item.linkUrl ? (
-          <a href={item.linkUrl} target="_blank" rel="noreferrer">
-            {linkLabel}
-          </a>
-        ) : (
-          <span className="item-body-muted">링크 정보가 없습니다.</span>
-        )}
-        {hostname ? <span className="item-subtext">{hostname}</span> : null}
-        {item.linkImage ? (
-          <img src={item.linkImage} alt={linkLabel ?? "링크 이미지"} className="item-link-preview" />
-        ) : null}
-        {item.linkDesc ? <p className="item-subtext">{item.linkDesc}</p> : null}
+      <div className="item-body item-body-visual">
+        <div className="item-visual-row">
+          {item.linkImage ? (
+            <img src={item.linkImage} alt={linkLabel ?? "링크 이미지"} className="item-link-preview" />
+          ) : null}
+          <div className="item-visual-details">
+            {item.linkUrl ? (
+              <a href={item.linkUrl} target="_blank" rel="noreferrer" className="item-visual-title">
+                {linkLabel}
+              </a>
+            ) : (
+              <span className="item-body-muted">링크 정보가 없습니다.</span>
+            )}
+            {hostname ? <span className="item-subtext">{hostname}</span> : null}
+            {item.linkDesc ? <p className="item-subtext">{item.linkDesc}</p> : null}
+          </div>
+        </div>
       </div>
     );
   }
@@ -234,7 +238,7 @@ function renderItemBody(item: ItemViewModel) {
   const downloadPath = buildFileHref(item.filePath);
 
   return (
-    <div className="item-body">
+    <div className="item-body item-body-visual">
       {downloadPath ? (
         <a href={downloadPath} download={item.fileOriginalName ?? undefined}>
           {fileLabel}
@@ -269,21 +273,41 @@ function formatSessionLabel(date: Date | null): string {
   return `${month}월 ${day}일 ${hourLabel}${minuteLabel}`;
 }
 
-function formatTimestamp(date: Date): string {
-  return `${formatDate(date)} ${formatTime(date)}`;
-}
+function formatRelativeTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
 
-function formatDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+  if (diffMs <= 0) {
+    return "방금 전";
+  }
 
-function formatTime(date: Date): string {
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${hour}:${minute}`;
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 60) {
+    return "방금 전";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}분 전`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}시간 전`;
+  }
+
+  const days = Math.floor(hours / 24);
+  if (days < 30) {
+    return `${days}일 전`;
+  }
+
+  const months = Math.floor(days / 30);
+  if (months < 12) {
+    return `${months}개월 전`;
+  }
+
+  const years = Math.floor(months / 12);
+  return `${years}년 전`;
 }
 
 function buildFileHref(filePath: string | null): string | null {
