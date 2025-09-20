@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+
+import { AnonIdentify } from "@/components/AnonIdentify";
+
 import "./globals.css";
 
 const inter = Inter({
@@ -19,7 +22,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko" className={inter.variable}>
-      <body>{children}</body>
+      <body>
+        <AnonIdentify />
+        {children}
+      </body>
     </html>
   );
 }

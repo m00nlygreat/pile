@@ -1,10 +1,11 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { boards, channels, items, type Board, type Channel } from "@/db/schema";
+import { anonUsers, boards, channels, items, type Board, type Channel } from "@/db/schema";
 import { resolveSessionStart } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/uploads";
 import { fetchLinkMetadata } from "@/lib/og";
@@ -26,19 +27,23 @@ type LinkPayload = {
 };
 
 const maxUploadBytes = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10)) * 1024 * 1024;
+const ANON_COOKIE_NAME = "anon_id";
+
+export const runtime = "nodejs";
 
 export async function POST(
   request: Request,
   { params }: { params: RouteParams },
 ): Promise<NextResponse> {
   const contentType = request.headers.get("content-type") ?? "";
+  const anonUserId = resolveAnonUserIdFromCookie();
 
   if (contentType.includes("multipart/form-data")) {
-    return handleFilePaste(request, params);
+    return handleFilePaste(request, params, anonUserId);
   }
 
   if (contentType.includes("application/json")) {
-    return handleJsonPaste(request, params);
+    return handleJsonPaste(request, params, anonUserId);
   }
 
   return NextResponse.json({ error: "지원하지 않는 요청 형식입니다." }, { status: 400 });
@@ -47,6 +52,7 @@ export async function POST(
 async function handleJsonPaste(
   request: Request,
   params: RouteParams,
+  anonUserId: string | null,
 ): Promise<NextResponse> {
   let payload: TextPayload | LinkPayload;
 
@@ -61,17 +67,21 @@ async function handleJsonPaste(
   }
 
   if (payload.type === "text") {
-    return handleTextPayload(payload, params);
+    return handleTextPayload(payload, params, anonUserId);
   }
 
   if (payload.type === "link") {
-    return handleLinkPayload(payload, params);
+    return handleLinkPayload(payload, params, anonUserId);
   }
 
   return NextResponse.json({ error: "지원하지 않는 아이템 형식입니다." }, { status: 400 });
 }
 
-async function handleTextPayload(payload: TextPayload, params: RouteParams): Promise<NextResponse> {
+async function handleTextPayload(
+  payload: TextPayload,
+  params: RouteParams,
+  anonUserId: string | null,
+): Promise<NextResponse> {
   const rawText = typeof payload.text === "string" ? payload.text : "";
   const normalizedText = rawText.replace(/\r\n/g, "\n");
   const textMd = normalizedText.trim();
@@ -93,6 +103,7 @@ async function handleTextPayload(payload: TextPayload, params: RouteParams): Pro
       id: itemId,
       boardId: context.board.id,
       channelId: context.channel.id,
+      ...(anonUserId ? { anonUserId } : {}),
       type: "text",
       textMd,
       sessionStart,
@@ -102,7 +113,11 @@ async function handleTextPayload(payload: TextPayload, params: RouteParams): Pro
   return NextResponse.json({ ok: true, itemId }, { status: 201 });
 }
 
-async function handleLinkPayload(payload: LinkPayload, params: RouteParams): Promise<NextResponse> {
+async function handleLinkPayload(
+  payload: LinkPayload,
+  params: RouteParams,
+  anonUserId: string | null,
+): Promise<NextResponse> {
   const sanitizedUrl = sanitizeUrl(payload.url);
   if (!sanitizedUrl) {
     return NextResponse.json({ error: "유효한 링크가 아닙니다." }, { status: 400 });
@@ -122,6 +137,7 @@ async function handleLinkPayload(payload: LinkPayload, params: RouteParams): Pro
       id: itemId,
       boardId: context.board.id,
       channelId: context.channel.id,
+      ...(anonUserId ? { anonUserId } : {}),
       type: "link",
       linkUrl: sanitizedUrl,
       linkTitle: metadata.title,
@@ -147,6 +163,7 @@ async function handleLinkPayload(payload: LinkPayload, params: RouteParams): Pro
 async function handleFilePaste(
   request: Request,
   params: RouteParams,
+  anonUserId: string | null,
 ): Promise<NextResponse> {
   const formData = await request.formData();
   const typeField = formData.get("type");
@@ -177,7 +194,11 @@ async function handleFilePaste(
     );
   }
 
-  const context = findBoardAndChannel(params.boardId, typeof channelIdField === "string" ? channelIdField : undefined);
+  const channelIdField = formData.get("channelId");
+  const context = findBoardAndChannel(
+    params.boardId,
+    typeof channelIdField === "string" ? channelIdField : undefined,
+  );
 
   if (!context) {
     return NextResponse.json({ error: "보드 또는 채널을 찾을 수 없습니다." }, { status: 404 });
@@ -192,6 +213,7 @@ async function handleFilePaste(
       id: itemId,
       boardId: context.board.id,
       channelId: context.channel.id,
+      ...(anonUserId ? { anonUserId } : {}),
       type: "file",
       filePath: saved.relativePath,
       fileMime: saved.mimeType,
@@ -265,4 +287,30 @@ function sanitizeUrl(value: string | null | undefined): string | null {
   } catch (error) {
     return null;
   }
+}
+
+function resolveAnonUserIdFromCookie(): string | null {
+  const cookieValue = cookies().get(ANON_COOKIE_NAME)?.value ?? null;
+  if (!cookieValue) {
+    return null;
+  }
+
+  const [existing] = db
+    .select({ id: anonUsers.id })
+    .from(anonUsers)
+    .where(eq(anonUsers.id, cookieValue))
+    .limit(1)
+    .all();
+
+  if (!existing) {
+    return null;
+  }
+
+  db
+    .update(anonUsers)
+    .set({ lastSeenAt: new Date() })
+    .where(eq(anonUsers.id, existing.id))
+    .run();
+
+  return existing.id;
 }
