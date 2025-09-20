@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { MarkdownPreview } from "@/components/MarkdownPreview";
 import type { BoardChannelContext } from "@/lib/board-data";
 import { getBoardChannelContext } from "@/lib/board-data";
 
@@ -239,7 +240,7 @@ function resolveAuthorName(item: ItemViewModel): string {
 function renderItemBody(item: ItemViewModel) {
   if (item.type === "text") {
     return item.textMd ? (
-      <p className="item-body">{item.textMd}</p>
+      <MarkdownPreview content={item.textMd} className="item-body" />
     ) : (
       <p className="item-body item-body-muted">(내용이 비어 있습니다)</p>
     );

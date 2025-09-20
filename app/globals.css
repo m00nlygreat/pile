@@ -630,6 +630,63 @@ main {
   line-height: 1.5;
 }
 
+.markdown-preview {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.markdown-preview p {
+  margin: 0;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4,
+.markdown-preview h5,
+.markdown-preview h6 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.markdown-preview h1 {
+  font-size: 1.5rem;
+}
+
+.markdown-preview h2 {
+  font-size: 1.35rem;
+}
+
+.markdown-preview h3 {
+  font-size: 1.2rem;
+}
+
+.markdown-preview pre {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  overflow-x: auto;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.markdown-inline-code {
+  padding: 0.1rem 0.35rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.65);
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.markdown-preview ul,
+.markdown-preview ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
 .item-body a {
   color: var(--color-accent);
 }
