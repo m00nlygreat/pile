@@ -32,6 +32,36 @@ export function getActiveAnonUserId(): string | null {
   return existing.id;
 }
 
+export type ActiveAnonProfile = {
+  id: string;
+  nickname: string;
+  displayName: string | null;
+};
+
+export function getActiveAnonProfile(): ActiveAnonProfile | null {
+  const anonId = getActiveAnonUserId();
+  if (!anonId) {
+    return null;
+  }
+
+  const [record] = db
+    .select({ nickname: anonUsers.nickname, displayName: anonUsers.displayName })
+    .from(anonUsers)
+    .where(eq(anonUsers.id, anonId))
+    .limit(1)
+    .all();
+
+  if (!record) {
+    return null;
+  }
+
+  return {
+    id: anonId,
+    nickname: record.nickname,
+    displayName: record.displayName ?? null,
+  };
+}
+
 export function isAdminRequest(): boolean {
   const value = cookies().get(ADMIN_COOKIE_NAME)?.value ?? null;
   return verifyAdminCookie(value);

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { getBoardChannelContext } from "@/lib/board-data";
-import { getActiveAnonUserId, isAdminRequest } from "@/lib/anon-server";
+import { getActiveAnonProfile, getActiveAnonUserId, isAdminRequest } from "@/lib/anon-server";
 
 import BoardShell from "./BoardShell";
 
@@ -39,12 +39,14 @@ export default function BoardPage({
   const context = getBoardChannelContext(params.boardId);
   const viewerAnonId = getActiveAnonUserId();
   const viewerIsAdmin = isAdminRequest();
+  const viewerProfile = getActiveAnonProfile();
 
   return (
     <BoardShell
       context={context}
       viewerAnonId={viewerAnonId}
       viewerIsAdmin={viewerIsAdmin}
+      viewerProfile={viewerProfile}
       allowPlaceholder
     />
   );

@@ -7,6 +7,7 @@ import type { BoardChannelContext } from "@/lib/board-data";
 import DeleteItemButton from "./[channelId]/DeleteItemButton";
 import ChannelTabs from "./[channelId]/ChannelTabs";
 import PasteCapture from "./[channelId]/PasteCapture";
+import ViewerNameBadge, { type ViewerProfile } from "./ViewerNameBadge";
 
 type ItemViewModel = {
   id: string;
@@ -39,6 +40,7 @@ type BoardShellProps = {
   context: BoardChannelContext;
   viewerAnonId: string | null;
   viewerIsAdmin: boolean;
+  viewerProfile: ViewerProfile | null;
   allowPlaceholder: boolean;
 };
 
@@ -46,6 +48,7 @@ export default function BoardShell({
   context,
   viewerAnonId,
   viewerIsAdmin,
+  viewerProfile,
   allowPlaceholder,
 }: BoardShellProps) {
   const activeChannel = context.activeChannel;
@@ -73,6 +76,7 @@ export default function BoardShell({
           boardExists={context.boardExists}
           className="board-header-tabs"
         />
+        <ViewerNameBadge profile={viewerProfile} viewerIsAdmin={viewerIsAdmin} />
       </header>
       <PasteCapture boardSlug={context.board.slug} channelId={activeChannel?.id ?? null} />
 
