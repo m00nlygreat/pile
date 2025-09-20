@@ -42,8 +42,6 @@ type BoardShellProps = {
   allowPlaceholder: boolean;
 };
 
-const DEFAULT_CHANNEL_LABEL = "기본 채널";
-
 export default function BoardShell({
   context,
   viewerAnonId,
@@ -63,102 +61,50 @@ export default function BoardShell({
   const sessionGroups = activeChannel
     ? buildSessionGroups(context, { viewerAnonId, viewerIsAdmin })
     : [];
-
-  const totalItemCount = sessionGroups.reduce((acc, group) => acc + group.items.length, 0);
-  const channelName = activeChannel?.name ?? DEFAULT_CHANNEL_LABEL;
-  const helperMessage = context.boardExists && activeChannel
-    ? "붙여넣기나 드롭으로 텍스트·링크·파일을 추가하면 이 목록이 갱신됩니다."
-    : "아직 생성되지 않은 보드입니다. 붙여넣으면 기본 채널과 첫 아이템이 만들어집니다.";
-
   return (
     <main className="board-shell">
       <header className="board-header">
-        <div className="board-header-inner">
-          <span className="board-slug">/{context.board.slug}</span>
-          <h1>{context.board.name}</h1>
-          {context.boardExists ? (
-            context.board.description ? (
-              <p>{context.board.description}</p>
-            ) : (
-              <p className="board-description-muted">설명이 등록되지 않았습니다.</p>
-            )
-          ) : (
-            <p className="board-description-muted">
-              첫 아이템을 붙여넣으면 이 보드와 기본 채널이 자동으로 생성됩니다.
-            </p>
-          )}
-        </div>
-        <aside className="board-meta">
-          <dl>
-            <div>
-              <dt>채널 수</dt>
-              <dd>{context.channels.length}</dd>
-            </div>
-            <div>
-              <dt>현재 채널</dt>
-              <dd>{channelName}</dd>
-            </div>
-            <div>
-              <dt>권한</dt>
-              <dd>{viewerIsAdmin ? "관리자" : "참여자"}</dd>
-            </div>
-          </dl>
-        </aside>
+        <span className="board-path">/{context.board.slug}</span>
+        <ChannelTabs
+          boardSlug={context.board.slug}
+          channels={context.channels}
+          activeChannelId={activeChannel?.id ?? null}
+          viewerIsAdmin={viewerIsAdmin}
+          boardExists={context.boardExists}
+          className="board-header-tabs"
+        />
       </header>
+      <PasteCapture boardSlug={context.board.slug} channelId={activeChannel?.id ?? null} />
 
-      <ChannelTabs
-        boardSlug={context.board.slug}
-        channels={context.channels}
-        activeChannelId={activeChannel?.id ?? null}
-        viewerIsAdmin={viewerIsAdmin}
-        boardExists={context.boardExists}
-      />
-
-      <section className="channel-body" aria-live="polite">
-        <header className="channel-heading">
-          <div>
-            <h2>{channelName}</h2>
-            <p className="channel-helpers">{helperMessage}</p>
-          </div>
-          {context.boardExists && activeChannel ? (
-            <p className="channel-count">총 {totalItemCount}개 아이템</p>
-          ) : null}
-        </header>
-
-        <PasteCapture boardSlug={context.board.slug} channelId={activeChannel?.id ?? null} />
-
-        {!context.boardExists ? (
-          <p className="channel-empty">아직 아무도 아이템을 붙여넣지 않았어요.</p>
-        ) : sessionGroups.length === 0 ? (
-          <p className="channel-empty">아직 등록된 아이템이 없습니다.</p>
-        ) : (
-          sessionGroups.map((group) => (
-            <section key={group.key} className="session-block">
-              <header className="session-header">
-                <span className="session-pill">{group.label}</span>
-              </header>
-              <div className="session-items">
-                {group.items.map((item) => (
-                  <article key={item.id} className={`item-card item-card-${item.type}`}>
-                    <header className="item-meta">
-                      <div className="item-meta-primary">
-                        <span className="item-author">{resolveAuthorName(item)}</span>
-                        {item.createdAt ? (
-                          <time dateTime={item.createdAt.toISOString()}>
-                            {formatTimestamp(item.createdAt)}
-                          </time>
-                        ) : null}
-                      </div>
-                      {item.canDelete ? <DeleteItemButton itemId={item.id} /> : null}
-                    </header>
-                    {renderItemBody(item)}
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))
-        )}
-      </section>
+      {!context.boardExists ? (
+        <p className="channel-empty">아직 아무도 아이템을 붙여넣지 않았어요.</p>
+      ) : sessionGroups.length === 0 ? (
+        <p className="channel-empty">아직 등록된 아이템이 없습니다.</p>
+      ) : (
+        sessionGroups.map((group) => (
+          <section key={group.key} className="session-block">
+            <header className="session-header">
+              <span className="session-pill">{group.label}</span>
+            </header>
+            <div className="session-items">
+              {group.items.map((item) => (
+                <article key={item.id} className={`item-card item-card-${item.type}`}>
+                  <header className="item-meta">
+                    <div className="item-meta-primary">
+                      <span className="item-author">{resolveAuthorName(item)}</span>
+                      {item.createdAt ? (
+                        <time dateTime={item.createdAt.toISOString()}>{formatTimestamp(item.createdAt)}</time>
+                      ) : null}
+                    </div>
+                    {item.canDelete ? <DeleteItemButton itemId={item.id} /> : null}
+                  </header>
+                  {renderItemBody(item)}
+                </article>
+              ))}
+            </div>
+          </section>
+        ))
+      )}
     </main>
   );
 }
@@ -312,7 +258,15 @@ function formatSessionLabel(date: Date | null): string {
     return "세션 미지정";
   }
 
-  return `${formatDate(date)} ${formatTime(date)} 세션`;
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hour = date.getHours();
+  const minute = date.getMinutes();
+
+  const hourLabel = `${hour}시`;
+  const minuteLabel = minute > 0 ? ` ${minute}분` : "";
+
+  return `${month}월 ${day}일 ${hourLabel}${minuteLabel}`;
 }
 
 function formatTimestamp(date: Date): string {

@@ -16,18 +16,22 @@ export default function ChannelTabs({
   activeChannelId,
   viewerIsAdmin,
   boardExists,
+  className,
 }: {
   boardSlug: string;
   channels: ChannelInfo[];
   activeChannelId?: string | null;
   viewerIsAdmin: boolean;
   boardExists: boolean;
+  className?: string;
 }) {
   const [showModal, setShowModal] = useState(false);
 
+  const navClassName = ["channel-tabs", className].filter(Boolean).join(" ");
+
   return (
     <>
-      <nav className="channel-tabs" aria-label="채널 목록">
+      <nav className={navClassName} aria-label="채널 목록">
         {channels.length === 0 ? (
           <span className="channel-tab channel-tab-empty" aria-disabled="true">
             채널이 아직 없습니다.

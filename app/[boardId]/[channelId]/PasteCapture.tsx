@@ -12,18 +12,13 @@ type PasteCaptureProps = {
 
 type PasteStatus = "idle" | "posting" | "success" | "error";
 
+let bodyPulseTimeout: ReturnType<typeof setTimeout> | null = null;
+
 export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps) {
   const router = useRouter();
-  const [status, setStatus] = useState<PasteStatus>("idle");
-  const [message, setMessage] = useState(getIdleMessage(channelId));
+  const [message, setMessage] = useState<string | null>(null);
   const isPostingRef = useRef(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (status === "idle") {
-      setMessage(getIdleMessage(channelId));
-    }
-  }, [channelId, status]);
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
@@ -67,7 +62,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       }
 
       isPostingRef.current = true;
-      updateStatus("posting", "붙여넣은 텍스트를 업로드하는 중입니다...");
+      updateStatus("posting", null);
 
       try {
         const response = await fetch(`/api/boards/${boardSlug}/items`, {
@@ -82,11 +77,11 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           const data = (await response.json().catch(() => null)) as
             | { error?: string }
             | null;
-          updateStatus("error", data?.error ?? "아이템 생성에 실패했습니다.");
+          updateStatus("error", data?.error ?? null);
           return;
         }
 
-        updateStatus("success", "텍스트가 업로드되었어요.");
+        updateStatus("success", null);
         router.refresh();
       } catch (error) {
         updateStatus("error", "네트워크 오류가 발생했습니다.");
@@ -101,7 +96,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       }
 
       isPostingRef.current = true;
-      updateStatus("posting", "붙여넣은 링크를 분석하는 중입니다...");
+      updateStatus("posting", null);
 
       const preparedUrl =
         /^https?:\/\//i.test(urlValue) ? urlValue : `https://${urlValue.replace(/^\/*/, "")}`;
@@ -119,11 +114,11 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           const data = (await response.json().catch(() => null)) as
             | { error?: string }
             | null;
-          updateStatus("error", data?.error ?? "링크 업로드에 실패했습니다.");
+          updateStatus("error", data?.error ?? null);
           return;
         }
 
-        updateStatus("success", "링크가 업로드되었어요.");
+        updateStatus("success", null);
         router.refresh();
       } catch (error) {
         updateStatus("error", "네트워크 오류가 발생했습니다.");
@@ -138,7 +133,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       }
 
       isPostingRef.current = true;
-      updateStatus("posting", "붙여넣은 이미지를 업로드하는 중입니다...");
+      updateStatus("posting", null);
 
       const formData = new FormData();
       formData.append("type", "file");
@@ -159,11 +154,11 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           const data = (await response.json().catch(() => null)) as
             | { error?: string }
             | null;
-          updateStatus("error", data?.error ?? "이미지 업로드에 실패했습니다.");
+          updateStatus("error", data?.error ?? null);
           return;
         }
 
-        updateStatus("success", "이미지가 업로드되었어요.");
+        updateStatus("success", null);
         router.refresh();
       } catch (error) {
         updateStatus("error", "네트워크 오류가 발생했습니다.");
@@ -172,19 +167,21 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       }
     }
 
-    function updateStatus(nextStatus: PasteStatus, nextMessage: string) {
-      setStatus(nextStatus);
+    function updateStatus(nextStatus: PasteStatus, nextMessage: string | null) {
       setMessage(nextMessage);
 
-      if (nextStatus === "success") {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
+      if (nextStatus === "success" || nextStatus === "error") {
+        triggerBodyPulse(nextStatus);
+      }
+
+      if (nextStatus === "error" && nextMessage) {
+        if (errorTimeoutRef.current) {
+          clearTimeout(errorTimeoutRef.current);
         }
 
-        timeoutRef.current = setTimeout(() => {
-          setStatus("idle");
-          setMessage(getIdleMessage(channelId));
-          timeoutRef.current = null;
+        errorTimeoutRef.current = setTimeout(() => {
+          setMessage(null);
+          errorTimeoutRef.current = null;
         }, successTimeoutMs);
       }
     }
@@ -193,26 +190,18 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
 
     return () => {
       window.removeEventListener("paste", handlePaste);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+        errorTimeoutRef.current = null;
       }
     };
   }, [boardSlug, channelId, router]);
 
   return (
-    <div className={`paste-indicator paste-indicator-${status}`} aria-live="polite">
+    <div className="sr-only" aria-live="polite">
       {message}
     </div>
   );
-}
-
-function getIdleMessage(channelId?: string | null): string {
-  if (channelId) {
-    return "이 채널에서 붙여넣으면 즉시 아이템이 생성됩니다.";
-  }
-
-  return "이 보드에서 붙여넣으면 기본 채널이 만들어지고 아이템이 추가됩니다.";
 }
 
 function buildJsonPayload(
@@ -291,4 +280,39 @@ function deriveFileName(file: File): string {
   }
 
   return `clipboard-${Date.now()}.png`;
+}
+
+function triggerBodyPulse(status: PasteStatus) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const body = document.body;
+  if (!body) {
+    return;
+  }
+
+  let tint: string | null = null;
+  if (status === "success") {
+    tint = "radial-gradient(circle at top, rgba(34, 197, 94, 0.18) 0%, rgba(5, 11, 22, 1) 70%)";
+  } else if (status === "error") {
+    tint = "radial-gradient(circle at top, rgba(248, 113, 113, 0.24) 0%, rgba(5, 11, 22, 1) 70%)";
+  }
+
+  if (!tint) {
+    return;
+  }
+
+  body.style.setProperty("--bg-current", tint);
+
+  if (bodyPulseTimeout) {
+    clearTimeout(bodyPulseTimeout);
+  }
+
+  const duration = status === "error" ? 900 : 650;
+
+  bodyPulseTimeout = setTimeout(() => {
+    body.style.setProperty("--bg-current", "var(--bg-base)");
+    bodyPulseTimeout = null;
+  }, duration);
 }
