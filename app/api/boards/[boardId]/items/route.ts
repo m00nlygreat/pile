@@ -4,13 +4,19 @@ import { randomUUID } from "node:crypto";
 import { and, eq, max } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { boards, channels, items, type Board, type Channel } from "@/db/schema";
+import { anonUsers, boards, channels, items, type Board, type Channel } from "@/db/schema";
 import { resolveSessionStart } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/uploads";
 import { fetchLinkMetadata } from "@/lib/og";
 import { getActiveAnonUserId, isAdminRequest } from "@/lib/anon-server";
 import { ADMIN_ANON_ID } from "@/lib/admin";
 import { ensureAdminAnonUser, markAdminLastSeen } from "@/lib/admin-server";
+import {
+  ANON_COOKIE_NAME,
+  createAnonId,
+  generateNickname,
+  getAnonCookieExpiry,
+} from "@/lib/anon";
 
 type RouteParams = {
   boardId: string;
@@ -35,6 +41,16 @@ const DEFAULT_CHANNEL_NAME = "공유";
 
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update">;
 
+type AnonIdentity = {
+  anonUserId: string | null;
+  cookie: {
+    value: string;
+    expires: Date;
+  } | null;
+};
+
+const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
+
 export const runtime = "nodejs";
 
 export async function POST(
@@ -42,23 +58,30 @@ export async function POST(
   { params }: { params: RouteParams },
 ): Promise<NextResponse> {
   const contentType = request.headers.get("content-type") ?? "";
-  const anonUserId = getActiveAnonUserId();
   const viewerIsAdmin = isAdminRequest();
+  const anonIdentity = resolveAnonIdentity(viewerIsAdmin);
+
   if (viewerIsAdmin) {
     ensureAdminAnonUser();
     markAdminLastSeen();
   }
-  const authorAnonId = viewerIsAdmin ? ADMIN_ANON_ID : anonUserId;
+  const authorAnonId = viewerIsAdmin ? ADMIN_ANON_ID : anonIdentity.anonUserId;
 
   if (contentType.includes("multipart/form-data")) {
-    return handleFilePaste(request, params, authorAnonId);
+    const response = await handleFilePaste(request, params, authorAnonId);
+    applyAnonCookie(response, anonIdentity.cookie);
+    return response;
   }
 
   if (contentType.includes("application/json")) {
-    return handleJsonPaste(request, params, authorAnonId);
+    const response = await handleJsonPaste(request, params, authorAnonId);
+    applyAnonCookie(response, anonIdentity.cookie);
+    return response;
   }
 
-  return NextResponse.json({ error: "지원하지 않는 요청 형식입니다." }, { status: 400 });
+  const response = NextResponse.json({ error: "지원하지 않는 요청 형식입니다." }, { status: 400 });
+  applyAnonCookie(response, anonIdentity.cookie);
+  return response;
 }
 
 async function handleJsonPaste(
@@ -414,6 +437,61 @@ function findChannelBySlug(
     .all();
 
   return channel ?? null;
+}
+
+function resolveAnonIdentity(isAdmin: boolean): AnonIdentity {
+  if (isAdmin) {
+    return { anonUserId: ADMIN_ANON_ID, cookie: null };
+  }
+
+  const existingId = getActiveAnonUserId();
+  if (existingId) {
+    return { anonUserId: existingId, cookie: null };
+  }
+
+  const anonId = createAnonId();
+  const nickname = generateNickname();
+  const now = new Date();
+
+  db
+    .insert(anonUsers)
+    .values({
+      id: anonId,
+      nickname,
+      lastSeenAt: now,
+    })
+    .onConflictDoUpdate({
+      target: anonUsers.id,
+      set: {
+        lastSeenAt: now,
+      },
+    })
+    .run();
+
+  return {
+    anonUserId: anonId,
+    cookie: {
+      value: anonId,
+      expires: getAnonCookieExpiry(),
+    },
+  };
+}
+
+function applyAnonCookie(response: NextResponse, cookie: AnonIdentity["cookie"]) {
+  if (!cookie) {
+    return;
+  }
+
+  response.cookies.set({
+    name: ANON_COOKIE_NAME,
+    value: cookie.value,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: ONE_YEAR_SECONDS,
+    expires: cookie.expires,
+  });
 }
 
 function sanitizeUrl(value: string | null | undefined): string | null {
