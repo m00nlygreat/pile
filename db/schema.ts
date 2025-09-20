@@ -103,6 +103,7 @@ export const items = sqliteTable(
     filePath: text("file_path"),
     fileMime: text("file_mime"),
     fileSize: integer("file_size"),
+    fileOriginalName: text("file_original_name"),
     linkUrl: text("link_url"),
     linkTitle: text("link_title"),
     linkDesc: text("link_desc"),

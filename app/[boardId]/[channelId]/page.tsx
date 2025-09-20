@@ -20,6 +20,7 @@ type ItemViewModel = {
   filePath: string | null;
   fileMime: string | null;
   fileSize: number | null;
+  fileOriginalName: string | null;
   linkUrl: string | null;
   linkTitle: string | null;
   linkDesc: string | null;
@@ -168,6 +169,7 @@ function buildSessionGroups(context: BoardChannelContext): SessionGroup[] {
       filePath: record.item.filePath ?? null,
       fileMime: record.item.fileMime ?? null,
       fileSize: record.item.fileSize ?? null,
+      fileOriginalName: record.item.fileOriginalName ?? null,
       linkUrl: record.item.linkUrl ?? null,
       linkTitle: record.item.linkTitle ?? null,
       linkDesc: record.item.linkDesc ?? null,
@@ -264,13 +266,13 @@ function renderItemBody(item: ItemViewModel) {
     );
   }
 
-  const fileLabel = item.filePath?.split("/").at(-1) ?? "파일";
+  const fileLabel = item.fileOriginalName ?? item.filePath?.split("/").at(-1) ?? "파일";
   const downloadPath = buildFileHref(item.filePath);
 
   return (
     <div className="item-body">
       {downloadPath ? (
-        <a href={downloadPath} download>
+        <a href={downloadPath} download={item.fileOriginalName ?? undefined}>
           {fileLabel}
         </a>
       ) : (

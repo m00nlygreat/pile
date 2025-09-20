@@ -17,7 +17,7 @@ export async function saveUploadedFile(file: File): Promise<SaveUploadedFileResu
   const month = String(now.getMonth() + 1).padStart(2, "0");
 
   const extension = resolveExtension(file);
-  const originalName = sanitizeFilename(file.name) || `clipboard${extension}`;
+  const originalName = deriveOriginalFilename(file, extension);
 
   const relativeDirectory = path.join(year, month);
   const fileName = `${randomUUID()}${extension}`;
@@ -70,4 +70,13 @@ function sanitizeFilename(name: string | undefined): string {
   }
 
   return name.replace(/[^a-zA-Z0-9.\-_]+/g, "").slice(0, 120);
+}
+
+function deriveOriginalFilename(file: File, extension: string): string {
+  const rawName = typeof file.name === "string" ? file.name.trim() : "";
+  if (rawName.length > 0) {
+    return rawName.slice(0, 120);
+  }
+
+  return `clipboard${extension}`;
 }

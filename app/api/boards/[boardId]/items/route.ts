@@ -147,11 +147,15 @@ async function handleFilePaste(
       filePath: saved.relativePath,
       fileMime: saved.mimeType,
       fileSize: saved.size,
+      fileOriginalName: saved.originalName,
       sessionStart,
     })
     .run();
 
-  return NextResponse.json({ ok: true, itemId, filePath: saved.relativePath }, { status: 201 });
+  return NextResponse.json(
+    { ok: true, itemId, filePath: saved.relativePath, fileOriginalName: saved.originalName },
+    { status: 201 },
+  );
 }
 
 function findBoardBySlug(slug: string): Board | null {

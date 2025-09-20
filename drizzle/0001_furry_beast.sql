@@ -1,0 +1,1 @@
+ALTER TABLE `items` ADD `file_original_name` text;
