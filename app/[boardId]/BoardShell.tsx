@@ -8,6 +8,7 @@ import DeleteItemButton from "./[channelId]/DeleteItemButton";
 import ChannelTabs from "./[channelId]/ChannelTabs";
 import PasteCapture from "./[channelId]/PasteCapture";
 import ViewerNameBadge, { type ViewerProfile } from "./ViewerNameBadge";
+import CopyItemButton from "./CopyItemButton";
 
 type ItemViewModel = {
   id: string;
@@ -21,6 +22,7 @@ type ItemViewModel = {
   linkTitle: string | null;
   linkDesc: string | null;
   linkImage: string | null;
+  fileHref: string | null;
   createdAt: Date | null;
   sessionStart: Date | null;
   authorNickname: string | null;
@@ -100,7 +102,16 @@ export default function BoardShell({
                         <time dateTime={item.createdAt.toISOString()}>{formatRelativeTime(item.createdAt)}</time>
                       ) : null}
                     </div>
-                    {item.canDelete ? <DeleteItemButton itemId={item.id} /> : null}
+                    <div className="item-meta-actions">
+                      {item.canDelete ? <DeleteItemButton itemId={item.id} /> : null}
+                      <CopyItemButton
+                        type={item.type}
+                        textMd={item.textMd}
+                        linkUrl={item.linkUrl}
+                        fileHref={item.fileHref}
+                        fileMime={item.fileMime}
+                      />
+                    </div>
                   </header>
                   {renderItemBody(item)}
                 </article>
@@ -133,6 +144,7 @@ function buildSessionGroups(
       fileMime: record.item.fileMime ?? null,
       fileSize: record.item.fileSize ?? null,
       fileOriginalName: record.item.fileOriginalName ?? null,
+      fileHref: buildFileHref(record.item.filePath ?? null),
       linkUrl: record.item.linkUrl ?? null,
       linkTitle: record.item.linkTitle ?? null,
       linkDesc: record.item.linkDesc ?? null,
@@ -255,7 +267,7 @@ function renderItemBody(item: ItemViewModel) {
   }
 
   const fileLabel = item.fileOriginalName ?? item.filePath?.split("/").at(-1) ?? "파일";
-  const downloadPath = buildFileHref(item.filePath);
+  const downloadPath = item.fileHref;
 
   return (
     <div className="item-body item-body-visual">

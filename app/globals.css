@@ -784,6 +784,43 @@ main {
   color: rgba(148, 163, 184, 0.75);
 }
 
+.item-copy-button {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.65);
+  color: rgba(226, 232, 240, 0.85);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.item-copy-button:hover {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+.item-copy-button:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.6);
+  outline-offset: 2px;
+}
+
+.item-copy-button[data-state="copied"] {
+  background: rgba(34, 197, 94, 0.28);
+  border-color: rgba(34, 197, 94, 0.6);
+  color: rgba(236, 253, 245, 0.95);
+}
+
+.item-copy-button[data-state="error"] {
+  background: rgba(248, 113, 113, 0.28);
+  border-color: rgba(248, 113, 113, 0.7);
+  color: rgba(254, 242, 242, 0.95);
+}
+
 .item-meta-primary {
   display: inline-flex;
   flex-wrap: wrap;
@@ -791,6 +828,60 @@ main {
   gap: 0.5rem;
 }
 
+.item-meta-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.item-delete-button {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.3);
+  color: rgba(254, 226, 226, 0.95);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.item-delete-button:hover {
+  background: rgba(185, 28, 28, 0.35);
+  border-color: rgba(248, 113, 113, 0.6);
+}
+
+.item-delete-button:focus-visible {
+  outline: 2px solid rgba(248, 113, 113, 0.7);
+  outline-offset: 2px;
+}
+
+.item-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.item-delete-button[data-state="pending"] {
+  background: rgba(185, 28, 28, 0.55);
+  border-color: rgba(248, 113, 113, 0.8);
+}
+
+.item-delete-spinner {
+  animation: item-spinner 0.9s linear infinite;
+}
+
+@keyframes item-spinner {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
 .item-author {
   font-weight: 600;
   color: var(--color-text);
