@@ -37,7 +37,7 @@ type LinkPayload = {
 const maxUploadBytes = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10)) * 1024 * 1024;
 
 const DEFAULT_CHANNEL_SLUG = "default";
-const DEFAULT_CHANNEL_NAME = "공유";
+const DEFAULT_CHANNEL_NAME = "일반";
 
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update">;
 

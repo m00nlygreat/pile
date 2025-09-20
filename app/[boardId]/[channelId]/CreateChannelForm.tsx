@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { normalizeSlug } from "@/lib/slug";
+
 export default function CreateChannelForm({
   boardSlug,
   className,
@@ -16,10 +18,14 @@ export default function CreateChannelForm({
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [slugDirty, setSlugDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const formClassName = ["channel-create-form", className].filter(Boolean).join(" ");
+  const autoSlug = normalizeSlug(name);
+  const displaySlug = slug.trim().length > 0 ? slug : autoSlug;
 
   return (
     <form
@@ -38,13 +44,16 @@ export default function CreateChannelForm({
 
         startTransition(async () => {
           setError(null);
+          const normalizedSlug = normalizeSlug(slug.trim());
+          const fallbackSlug = normalizeSlug(trimmed);
+          const finalSlug = normalizedSlug || fallbackSlug;
           const response = await fetch(`/api/boards/${boardSlug}/channels`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             credentials: "include",
-            body: JSON.stringify({ name: trimmed }),
+            body: JSON.stringify({ name: trimmed, slug: finalSlug }),
           });
 
           if (!response.ok) {
@@ -54,6 +63,8 @@ export default function CreateChannelForm({
           }
 
           setName("");
+          setSlug("");
+          setSlugDirty(false);
           onSuccess?.();
           router.refresh();
         });
@@ -64,11 +75,33 @@ export default function CreateChannelForm({
         <span>채널 이름</span>
         <input
           value={name}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => {
+            const nextName = event.target.value;
+            setName(nextName);
+            if (!slugDirty) {
+              setSlug(normalizeSlug(nextName));
+            }
+          }}
           disabled={pending}
           placeholder="예: 과제 제출"
           required
         />
+      </label>
+      <label className="stack">
+        <span>채널 경로</span>
+        <input
+          value={slug}
+          onChange={(event) => {
+            const raw = event.target.value;
+            const nextSlug = normalizeSlug(raw);
+            setSlug(nextSlug);
+            setSlugDirty(raw.length > 0);
+          }}
+          disabled={pending}
+          placeholder="예: hw-submissions"
+          inputMode="latin"
+        />
+        <p className="form-hint">/{boardSlug}/{displaySlug || "(자동 설정)"}</p>
       </label>
       {error ? <p className="form-error">{error}</p> : null}
       <div className="channel-create-actions">

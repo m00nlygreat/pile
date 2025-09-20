@@ -59,7 +59,7 @@ erDiagram
     Channel {
       string id PK
       string board_id FK
-      string name              // 예: 공유, 과제제출, 교안
+      string name              // 예: 일반, 과제제출, 교안
       string slug              // URL id, 기본 생성시 "default"
       integer order_index
       datetime created_at
@@ -111,7 +111,7 @@ erDiagram
   * 아이템 생성 시 서버가 `session_start`를 계산 후 저장 (예: 18:30\~19:30 블록 → `session_start=18:30`)
 * **채널 기본값**
 
-  * 보드 생성 시 `Channel{ slug="default", name="공유" }` 자동 생성 & `Board.default_channel_id`에 연결
+  * 보드 생성 시 `Channel{ slug="default", name="일반" }` 자동 생성 & `Board.default_channel_id`에 연결
 * **익명 사용자**
 
   * 최초 접근 시 `anon_id` 쿠키 발급, DB에 `AnonUser` upsert
@@ -486,4 +486,3 @@ services:
 * 기본 UI(보드/채널/아이템 카드, 드롭존)
 * 관리자 로그인/삭제
 * Dockerfile & compose, `./data` 마운트
-

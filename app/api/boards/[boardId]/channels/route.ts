@@ -50,7 +50,7 @@ export async function POST(
 
   const inputSlug = typeof payload.slug === "string" ? normalizeSlug(payload.slug) : "";
   const generatedSlug = normalizeSlug(name);
-  let slug = inputSlug || generatedSlug || `channel-${randomUUID().slice(0, 4)}`;
+  let slug = inputSlug || generatedSlug || randomUUID().slice(0, 8);
 
   const existing = db
     .select({ id: channels.id })

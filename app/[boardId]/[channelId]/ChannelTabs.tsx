@@ -59,29 +59,12 @@ export default function ChannelTabs({
       </nav>
 
       {viewerIsAdmin && boardExists && showModal ? (
-        <div
-          className="channel-modal-backdrop"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0, 0, 0, 0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setShowModal(false)}
-        >
+        <div className="channel-modal-backdrop" onClick={() => setShowModal(false)}>
           <div
             className="channel-modal-card"
-            style={{
-              background: "var(--panel-bg, #fff)",
-              borderRadius: "16px",
-              padding: "24px",
-              maxWidth: "360px",
-              width: "90%",
-              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.15)",
-            }}
+            role="dialog"
+            aria-label="새 채널 추가"
+            aria-modal="true"
             onClick={(event) => event.stopPropagation()}
           >
             <CreateChannelForm
