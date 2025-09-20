@@ -211,6 +211,22 @@ function renderItemBody(item: ItemViewModel) {
   if (item.type === "link") {
     const linkLabel = item.linkTitle?.trim().length ? item.linkTitle : item.linkUrl;
     const hostname = item.linkUrl ? safeHostname(item.linkUrl) : null;
+    const youtubeInfo = getYouTubeEmbedInfo(item.linkUrl);
+
+    if (youtubeInfo) {
+      return (
+        <div className="item-body item-body-visual">
+          <div className="item-visual-embed">
+            <iframe
+              src={`${youtubeInfo.embedUrl}?rel=0`}
+              title={linkLabel ?? "YouTube 동영상"}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="item-body item-body-visual">
@@ -340,6 +356,47 @@ function safeHostname(url: string): string | null {
   try {
     const parsed = new URL(url);
     return parsed.hostname;
+  } catch (error) {
+    return null;
+  }
+}
+
+function getYouTubeEmbedInfo(url: string | null): { embedUrl: string; videoId: string } | null {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, "").replace(/^m\./i, "");
+    let videoId: string | null = null;
+
+    if (host === "youtu.be") {
+      videoId = parsed.pathname.split("/").filter(Boolean)[0] ?? null;
+    } else if (host.endsWith("youtube.com")) {
+      const path = parsed.pathname;
+      if (path === "/watch") {
+        videoId = parsed.searchParams.get("v");
+      } else if (path.startsWith("/embed/")) {
+        videoId = path.split("/")[2] ?? null;
+      } else if (path.startsWith("/shorts/")) {
+        videoId = path.split("/")[2] ?? null;
+      }
+    }
+
+    if (!videoId) {
+      return null;
+    }
+
+    const cleanedId = videoId.replace(/[^a-zA-Z0-9_-]/g, "");
+    if (!cleanedId) {
+      return null;
+    }
+
+    return {
+      videoId: cleanedId,
+      embedUrl: `https://www.youtube.com/embed/${cleanedId}`,
+    };
   } catch (error) {
     return null;
   }
