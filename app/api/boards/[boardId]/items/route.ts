@@ -34,7 +34,10 @@ type LinkPayload = {
   channelId?: string;
 };
 
-const maxUploadBytes = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10)) * 1024 * 1024;
+const uploadSizeLimitMb = Math.max(1, Number.parseInt(process.env.MAX_UPLOAD_MB ?? "20", 10));
+const maxUploadBytes = uploadSizeLimitMb * 1024 * 1024;
+const blockedFileMimeTypes = new Set<string>();
+const blockedFileExtensions = new Set<string>();
 
 const DEFAULT_CHANNEL_SLUG = "default";
 const DEFAULT_CHANNEL_NAME = "일반";
@@ -52,6 +55,12 @@ type AnonIdentity = {
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
 export const runtime = "nodejs";
+export const config = {
+  api: {
+    bodyParser: false,
+    sizeLimit: "100mb",
+  },
+};
 
 export async function POST(
   request: Request,
@@ -68,7 +77,7 @@ export async function POST(
   const authorAnonId = viewerIsAdmin ? ADMIN_ANON_ID : anonIdentity.anonUserId;
 
   if (contentType.includes("multipart/form-data")) {
-    const response = await handleFilePaste(request, params, authorAnonId);
+    const response = await handleFileUpload(request, params, authorAnonId);
     applyAnonCookie(response, anonIdentity.cookie);
     return response;
   }
@@ -195,7 +204,7 @@ async function handleLinkPayload(
   );
 }
 
-async function handleFilePaste(
+async function handleFileUpload(
   request: Request,
   params: RouteParams,
   anonUserId: string | null,
@@ -209,22 +218,39 @@ async function handleFilePaste(
 
   const fileEntry = formData.get("file");
   if (!(fileEntry instanceof File)) {
-    return NextResponse.json({ error: "이미지를 찾을 수 없습니다." }, { status: 400 });
+    return NextResponse.json({ error: "파일을 찾을 수 없습니다." }, { status: 400 });
   }
 
   if (fileEntry.size === 0) {
     return NextResponse.json({ error: "비어 있는 파일은 업로드할 수 없습니다." }, { status: 400 });
   }
 
-  const fileType = (fileEntry.type || "").toLowerCase();
+  console.debug(
+    `[items.upload] incoming file`,
+    JSON.stringify({
+      mime: fileEntry.type,
+      size: fileEntry.size,
+      name: fileEntry.name,
+      limitMb: uploadSizeLimitMb,
+    }),
+  );
 
-  if (!fileType.startsWith("image/")) {
-    return NextResponse.json({ error: "이미지 파일만 붙여넣기 업로드가 가능합니다." }, { status: 400 });
+  if (isBlockedFileType(fileEntry)) {
+    return NextResponse.json(
+      {
+        error: "지원하지 않는 파일 형식입니다.",
+      },
+      { status: 400 },
+    );
   }
 
   if (fileEntry.size > maxUploadBytes) {
+    console.warn(
+      `[items.upload] file exceeds limit`,
+      JSON.stringify({ size: fileEntry.size, max: maxUploadBytes }),
+    );
     return NextResponse.json(
-      { error: `이미지는 최대 ${(maxUploadBytes / (1024 * 1024)).toFixed(0)}MB까지 업로드할 수 있습니다.` },
+      { error: `파일은 최대 ${uploadSizeLimitMb}MB까지 업로드할 수 있습니다.` },
       { status: 413 },
     );
   }
@@ -262,6 +288,33 @@ async function handleFilePaste(
     { ok: true, itemId, filePath: saved.relativePath, fileOriginalName: saved.originalName },
     { status: 201 },
   );
+}
+
+function isBlockedFileType(file: File): boolean {
+  const mime = (file.type || "").toLowerCase();
+  if (mime && blockedFileMimeTypes.has(mime)) {
+    return true;
+  }
+
+  const extension = extractExtension(file.name);
+  if (extension && blockedFileExtensions.has(extension)) {
+    return true;
+  }
+
+  return false;
+}
+
+function extractExtension(name: string | undefined): string | "" {
+  if (!name) {
+    return "";
+  }
+
+  const lastDotIndex = name.lastIndexOf(".");
+  if (lastDotIndex === -1) {
+    return "";
+  }
+
+  return name.slice(lastDotIndex).toLowerCase();
 }
 
 function findBoardAndChannel(

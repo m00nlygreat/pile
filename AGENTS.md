@@ -18,6 +18,7 @@ For the full product requirements, domain model, and API contract, always consul
 ## Local Development
 - Install dependencies with `npm install` (Node 20+).
 - Start the app with `npm run dev`; Next.js serves on port 3000 by default.
+- If uploads suddenly return HTTP 413, double-check the front proxy (e.g. Nginx) `client_max_body_size`; the app-side limit comes from `MAX_UPLOAD_MB`, but the proxy must allow the same or larger size.
 - The first server-side import of `db/client.ts` ensures migrations are applied; regenerate migrations with drizzle-kit when the schema changes.
 - To smoke-test DB connectivity without building new UI, visit `/db-test` while the dev server runs.
 
