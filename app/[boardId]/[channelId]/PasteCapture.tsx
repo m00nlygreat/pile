@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const successTimeoutMs = 1800;
@@ -17,63 +17,45 @@ let bodyPulseTimeout: ReturnType<typeof setTimeout> | null = null;
 export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<PasteStatus>("idle");
   const [isDropActive, setIsDropActive] = useState(false);
   const isPostingRef = useRef(false);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragCounterRef = useRef(0);
 
-  useEffect(() => {
-    function handlePaste(event: ClipboardEvent) {
-      if (shouldIgnorePasteTarget()) {
-        return;
-      }
+  const updateStatus = useCallback((nextStatus: PasteStatus, nextMessage: string | null) => {
+    setStatus(nextStatus);
+    setMessage(nextMessage);
 
-      const clipboardItems = Array.from(event.clipboardData?.items ?? []);
-      const imageItem = clipboardItems.find(
-        (item) => item.kind === "file" && item.type.toLowerCase().startsWith("image/"),
-      );
-
-      if (imageItem) {
-        const file = imageItem.getAsFile();
-        if (file) {
-          event.preventDefault();
-          void submitFiles([file]);
-          return;
-        }
-      }
-
-      const text = event.clipboardData?.getData("text/plain") ?? "";
-      const normalized = text.replace(/\r\n/g, "\n").trim();
-
-      if (!normalized) {
-        return;
-      }
-
-      if (isLikelyUrl(normalized)) {
-        event.preventDefault();
-        void submitLink(normalized);
-        return;
-      }
-
-      void submitText(normalized);
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+      errorTimeoutRef.current = null;
     }
 
-    function hasFilePayload(event: DragEvent): boolean {
-      const types = event.dataTransfer?.types;
-      if (!types) {
-        return false;
-      }
-
-      for (let index = 0; index < types.length; index += 1) {
-        if (types[index] === "Files") {
-          return true;
-        }
-      }
-
-      return false;
+    if (statusResetTimeoutRef.current) {
+      clearTimeout(statusResetTimeoutRef.current);
+      statusResetTimeoutRef.current = null;
     }
 
-    async function submitText(content: string) {
+    if (nextStatus === "success" || nextStatus === "error") {
+      triggerBodyPulse(nextStatus);
+      statusResetTimeoutRef.current = setTimeout(() => {
+        setStatus("idle");
+        statusResetTimeoutRef.current = null;
+      }, successTimeoutMs);
+    }
+
+    if (nextStatus === "error" && nextMessage) {
+      errorTimeoutRef.current = setTimeout(() => {
+        setMessage(null);
+        errorTimeoutRef.current = null;
+      }, successTimeoutMs);
+    }
+  }, []);
+
+  const submitText = useCallback(
+    async (content: string) => {
       if (isPostingRef.current) {
         return;
       }
@@ -91,9 +73,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
         });
 
         if (!response.ok) {
-          const data = (await response.json().catch(() => null)) as
-            | { error?: string }
-            | null;
+          const data = (await response.json().catch(() => null)) as { error?: string } | null;
           updateStatus("error", data?.error ?? null);
           return;
         }
@@ -105,9 +85,12 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       } finally {
         isPostingRef.current = false;
       }
-    }
+    },
+    [boardSlug, channelId, router, updateStatus],
+  );
 
-    async function submitLink(urlValue: string) {
+  const submitLink = useCallback(
+    async (urlValue: string) => {
       if (isPostingRef.current) {
         return;
       }
@@ -128,9 +111,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
         });
 
         if (!response.ok) {
-          const data = (await response.json().catch(() => null)) as
-            | { error?: string }
-            | null;
+          const data = (await response.json().catch(() => null)) as { error?: string } | null;
           updateStatus("error", data?.error ?? null);
           return;
         }
@@ -142,9 +123,12 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       } finally {
         isPostingRef.current = false;
       }
-    }
+    },
+    [boardSlug, channelId, router, updateStatus],
+  );
 
-    async function submitFiles(files: File[]) {
+  const submitFiles = useCallback(
+    async (files: File[]) => {
       const validFiles = files.filter((file) => file && file.size > 0);
       if (validFiles.length === 0) {
         return;
@@ -177,9 +161,7 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           });
 
           if (!response.ok) {
-            const data = (await response.json().catch(() => null)) as
-              | { error?: string }
-              | null;
+            const data = (await response.json().catch(() => null)) as { error?: string } | null;
             updateStatus("error", data?.error ?? null);
             hasError = true;
             break;
@@ -204,6 +186,137 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       } finally {
         isPostingRef.current = false;
       }
+    },
+    [boardSlug, channelId, router, updateStatus],
+  );
+
+  const processClipboardText = useCallback(
+    (text: string): "link" | "text" | null => {
+      const normalized = text.replace(/\r\n/g, "\n").trim();
+
+      if (!normalized) {
+        return null;
+      }
+
+      if (isLikelyUrl(normalized)) {
+        void submitLink(normalized);
+        return "link";
+      }
+
+      void submitText(normalized);
+      return "text";
+    },
+    [submitLink, submitText],
+  );
+
+  const handleManualPasteClick = useCallback(async () => {
+    if (isPostingRef.current) {
+      return;
+    }
+
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      updateStatus("error", "브라우저가 클립보드 읽기를 지원하지 않아요.");
+      return;
+    }
+
+    try {
+      const clipboard = navigator.clipboard as Clipboard & {
+        read?: () => Promise<ClipboardItem[]>;
+        readText?: () => Promise<string>;
+      };
+
+      if (typeof clipboard.read === "function") {
+        const items = await clipboard.read();
+        const imageFiles: File[] = [];
+        let textCandidate: string | null = null;
+
+        for (const item of items) {
+          const imageType = item.types.find((type) => type.toLowerCase().startsWith("image/"));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const mime = blob.type || imageType;
+            const file = new File([blob], buildClipboardFileName(mime), { type: mime });
+            imageFiles.push(file);
+            continue;
+          }
+
+          if (item.types.includes("text/plain")) {
+            const blob = await item.getType("text/plain");
+            const text = await blob.text();
+            if (text && text.trim().length > 0) {
+              textCandidate = text;
+            }
+          }
+        }
+
+        if (imageFiles.length > 0) {
+          await submitFiles(imageFiles);
+          return;
+        }
+
+        if (textCandidate !== null && processClipboardText(textCandidate)) {
+          return;
+        }
+      }
+
+      if (typeof clipboard.readText === "function") {
+        const text = await clipboard.readText();
+        if (processClipboardText(text)) {
+          return;
+        }
+      }
+
+      updateStatus("error", "클립보드에서 붙여넣을 수 있는 내용을 찾지 못했어요.");
+    } catch (error) {
+      if (isClipboardPermissionError(error)) {
+        updateStatus("error", "브라우저에서 붙여넣기 권한을 허용해주세요.");
+        return;
+      }
+
+      updateStatus("error", "클립보드를 읽는 중 오류가 발생했습니다.");
+    }
+  }, [processClipboardText, submitFiles, updateStatus]);
+
+  useEffect(() => {
+    function handlePaste(event: ClipboardEvent) {
+      if (shouldIgnorePasteTarget()) {
+        return;
+      }
+
+      const clipboardItems = Array.from(event.clipboardData?.items ?? []);
+      const imageItem = clipboardItems.find(
+        (item) => item.kind === "file" && item.type.toLowerCase().startsWith("image/"),
+      );
+
+      if (imageItem) {
+        const file = imageItem.getAsFile();
+        if (file) {
+          event.preventDefault();
+          void submitFiles([file]);
+          return;
+        }
+      }
+
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      const outcome = processClipboardText(text);
+      if (outcome === "link") {
+        event.preventDefault();
+      }
+    }
+
+    function hasFilePayload(event: DragEvent): boolean {
+      const types = event.dataTransfer?.types;
+      if (!types) {
+        return false;
+      }
+
+      for (let index = 0; index < types.length; index += 1) {
+        if (types[index] === "Files") {
+          return true;
+        }
+      }
+
+      return false;
     }
 
     function handleDragEnter(event: DragEvent) {
@@ -253,25 +366,6 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
       }
     }
 
-    function updateStatus(nextStatus: PasteStatus, nextMessage: string | null) {
-      setMessage(nextMessage);
-
-      if (nextStatus === "success" || nextStatus === "error") {
-        triggerBodyPulse(nextStatus);
-      }
-
-      if (nextStatus === "error" && nextMessage) {
-        if (errorTimeoutRef.current) {
-          clearTimeout(errorTimeoutRef.current);
-        }
-
-        errorTimeoutRef.current = setTimeout(() => {
-          setMessage(null);
-          errorTimeoutRef.current = null;
-        }, successTimeoutMs);
-      }
-    }
-
     window.addEventListener("paste", handlePaste);
     window.addEventListener("dragenter", handleDragEnter);
     window.addEventListener("dragover", handleDragOver);
@@ -288,9 +382,22 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
         clearTimeout(errorTimeoutRef.current);
         errorTimeoutRef.current = null;
       }
+      if (statusResetTimeoutRef.current) {
+        clearTimeout(statusResetTimeoutRef.current);
+        statusResetTimeoutRef.current = null;
+      }
       dragCounterRef.current = 0;
     };
-  }, [boardSlug, channelId, router]);
+  }, [processClipboardText, submitFiles]);
+
+  const buttonLabel =
+    status === "posting"
+      ? "붙여넣는 중..."
+      : status === "success"
+        ? "붙여넣었어요!"
+        : status === "error"
+          ? "다시 시도하기"
+          : "붙여넣기";
 
   return (
     <>
@@ -304,6 +411,56 @@ export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps
           </div>
         </div>
       ) : null}
+      <button
+        type="button"
+        className="mobile-paste-button"
+        data-status={status}
+        onClick={() => {
+          void handleManualPasteClick();
+        }}
+        aria-busy={status === "posting"}
+        disabled={status === "posting"}
+      >
+        <span className="mobile-paste-button-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false" role="img">
+            <path
+              d="M16 4h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <rect
+              x="8"
+              y="2"
+              width="8"
+              height="4"
+              rx="1"
+              ry="1"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path
+              d="M12 10.5v5.2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+            <path
+              d="m10 13.9 2 1.9 2-1.9"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <span className="mobile-paste-button-label">{buttonLabel}</span>
+      </button>
     </>
   );
 }
@@ -357,7 +514,6 @@ function isLikelyUrl(value: string): boolean {
     return true;
   }
 
-  // Allow URLs without protocol but with www.
   if (/^www\.[^\s]+\.[a-z]{2,}$/i.test(value)) {
     return true;
   }
@@ -393,6 +549,39 @@ function deriveFileName(file: File): string {
   }
 
   return `clipboard-${Date.now()}.png`;
+}
+
+function buildClipboardFileName(mime: string): string {
+  const normalized = (mime || "").toLowerCase();
+
+  if (normalized === "image/png") {
+    return `clipboard-${Date.now()}.png`;
+  }
+
+  if (normalized === "image/jpeg" || normalized === "image/jpg") {
+    return `clipboard-${Date.now()}.jpg`;
+  }
+
+  if (normalized === "image/gif") {
+    return `clipboard-${Date.now()}.gif`;
+  }
+
+  if (normalized === "image/webp") {
+    return `clipboard-${Date.now()}.webp`;
+  }
+
+  if (normalized === "image/svg+xml") {
+    return `clipboard-${Date.now()}.svg`;
+  }
+
+  return `clipboard-${Date.now()}.png`;
+}
+
+function isClipboardPermissionError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "NotAllowedError" || error.name === "SecurityError" || error.name === "NotFoundError")
+  );
 }
 
 function triggerBodyPulse(status: PasteStatus) {
