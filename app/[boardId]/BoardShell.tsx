@@ -69,17 +69,19 @@ export default function BoardShell({
   return (
     <main className="board-shell">
       <header className="board-header">
-        <span className="board-path">/{context.board.slug}</span>
-        <ChannelTabs
-          boardSlug={context.board.slug}
-          channels={context.channels}
-          activeChannelId={activeChannel?.id ?? null}
-          viewerIsAdmin={viewerIsAdmin}
-          boardExists={context.boardExists}
-          className="board-header-tabs"
-        />
-        <ViewerNameBadge profile={viewerProfile} viewerIsAdmin={viewerIsAdmin} />
+        <div className="board-header-top">
+          <span className="board-path">/{context.board.slug}</span>
+          <ViewerNameBadge profile={viewerProfile} viewerIsAdmin={viewerIsAdmin} />
+        </div>
       </header>
+      <ChannelTabs
+        boardSlug={context.board.slug}
+        channels={context.channels}
+        activeChannelId={activeChannel?.id ?? null}
+        viewerIsAdmin={viewerIsAdmin}
+        boardExists={context.boardExists}
+        className="board-header-tabs"
+      />
       <PasteCapture boardSlug={context.board.slug} channelId={activeChannel?.id ?? null} />
 
       {!context.boardExists ? (
@@ -231,15 +233,13 @@ function renderItemBody(item: ItemViewModel) {
 
     if (youtubeInfo) {
       return (
-        <div className="item-body item-body-visual">
-          <div className="item-visual-embed">
-            <iframe
-              src={`${youtubeInfo.embedUrl}?rel=0`}
-              title={linkLabel ?? "YouTube 동영상"}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
-          </div>
+        <div className="item-visual-embed">
+          <iframe
+            src={`${youtubeInfo.embedUrl}?rel=0`}
+            title={linkLabel ?? "YouTube 동영상"}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
         </div>
       );
     }
@@ -269,6 +269,27 @@ function renderItemBody(item: ItemViewModel) {
   const fileLabel = item.fileOriginalName ?? item.filePath?.split("/").at(-1) ?? "파일";
   const downloadPath = item.fileHref;
 
+  const isImage = item.fileMime?.startsWith("image/") && downloadPath;
+
+  if (isImage) {
+    return (
+      <>
+        {downloadPath ? (
+          <a href={downloadPath} download={item.fileOriginalName ?? undefined} className="item-file-link">
+            {fileLabel}
+          </a>
+        ) : (
+          <span className="item-body-muted">파일 경로가 없습니다.</span>
+        )}
+        {downloadPath ? <img src={downloadPath} alt={fileLabel} className="item-image-preview" /> : null}
+        <p className="item-subtext">
+          {item.fileMime ?? "알 수 없는 형식"}
+          {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
+        </p>
+      </>
+    );
+  }
+
   return (
     <div className="item-body item-body-visual">
       {downloadPath ? (
@@ -278,9 +299,6 @@ function renderItemBody(item: ItemViewModel) {
       ) : (
         <span className="item-body-muted">파일 경로가 없습니다.</span>
       )}
-      {item.fileMime?.startsWith("image/") && downloadPath ? (
-        <img src={downloadPath} alt={fileLabel} className="item-image-preview" />
-      ) : null}
       <p className="item-subtext">
         {item.fileMime ?? "알 수 없는 형식"}
         {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
