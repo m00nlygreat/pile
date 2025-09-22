@@ -26,8 +26,8 @@ export default function HomePage() {
   return (
     <main className="shell">
       <header className="hero">
-        <span className="wordmark" aria-label="pile wordmark">pile</span>
-        <h1>로그인 없는 강의용 보드</h1>
+        <span className="wordmark" aria-label="pile wordmark">실시간 붙여넣기 보드</span>
+        <h1>PILE</h1>
         <p>
           링크, 파일, 메모를 붙여 넣으면 채널별로 정돈됩니다. 서버는 SQLite와 로컬 디스크
           하나면 충분합니다.
