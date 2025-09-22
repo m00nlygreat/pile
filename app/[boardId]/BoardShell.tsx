@@ -270,39 +270,35 @@ function renderItemBody(item: ItemViewModel) {
   const downloadPath = item.fileHref;
 
   const isImage = item.fileMime?.startsWith("image/") && downloadPath;
+  const fileMetaText = `${item.fileMime ?? "알 수 없는 형식"}${
+    item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""
+  }`;
+
+  const fileHeading = (
+    <div className="item-file-heading">
+      {downloadPath ? (
+        <a href={downloadPath} download={item.fileOriginalName ?? undefined} className="item-file-link">
+          {fileLabel}
+        </a>
+      ) : (
+        <span className="item-body-muted">파일 경로가 없습니다.</span>
+      )}
+      <span className="item-file-meta">{fileMetaText}</span>
+    </div>
+  );
 
   if (isImage) {
     return (
       <>
-        {downloadPath ? (
-          <a href={downloadPath} download={item.fileOriginalName ?? undefined} className="item-file-link">
-            {fileLabel}
-          </a>
-        ) : (
-          <span className="item-body-muted">파일 경로가 없습니다.</span>
-        )}
+        {fileHeading}
         {downloadPath ? <img src={downloadPath} alt={fileLabel} className="item-image-preview" /> : null}
-        <p className="item-subtext">
-          {item.fileMime ?? "알 수 없는 형식"}
-          {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
-        </p>
       </>
     );
   }
 
   return (
     <div className="item-body item-body-visual">
-      {downloadPath ? (
-        <a href={downloadPath} download={item.fileOriginalName ?? undefined}>
-          {fileLabel}
-        </a>
-      ) : (
-        <span className="item-body-muted">파일 경로가 없습니다.</span>
-      )}
-      <p className="item-subtext">
-        {item.fileMime ?? "알 수 없는 형식"}
-        {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
-      </p>
+      {fileHeading}
     </div>
   );
 }

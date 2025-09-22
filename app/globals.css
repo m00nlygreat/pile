@@ -1117,11 +1117,24 @@ main > * {
   color: var(--color-text);
 }
 
+.item-file-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.item-file-meta {
+  font-size: 0.85rem;
+  color: rgba(148, 163, 184, 0.55);
+}
+
 .item-image-preview {
   display: block;
   margin: 0 auto;
-  width: min(100%, 320px);
-  max-height: 35vh;
+  width: 100%;
+  max-height: 60vh;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   background: rgba(15, 23, 42, 0.35);
