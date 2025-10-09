@@ -12,8 +12,6 @@ type PasteCaptureProps = {
 
 type PasteStatus = "idle" | "posting" | "success" | "error";
 
-let bodyPulseTimeout: ReturnType<typeof setTimeout> | null = null;
-
 export default function PasteCapture({ boardSlug, channelId }: PasteCaptureProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
@@ -594,27 +592,19 @@ function triggerBodyPulse(status: PasteStatus) {
     return;
   }
 
-  let tint: string | null = null;
-  if (status === "success") {
-    tint = "radial-gradient(circle at top, rgba(34, 197, 94, 0.18) 0%, rgba(5, 11, 22, 1) 70%)";
-  } else if (status === "error") {
-    tint = "radial-gradient(circle at top, rgba(248, 113, 113, 0.24) 0%, rgba(5, 11, 22, 1) 70%)";
-  }
+  const successClass = "pulse-success";
+  const errorClass = "pulse-error";
 
-  if (!tint) {
-    return;
-  }
+  const className = status === "success" ? successClass : errorClass;
 
-  body.style.setProperty("--bg-current", tint);
+  body.classList.remove(successClass, errorClass);
+  // void body.offsetWidth;
+  body.classList.add(className);
 
-  if (bodyPulseTimeout) {
-    clearTimeout(bodyPulseTimeout);
-  }
+  const handleAnimationEnd = () => {
+    body.classList.remove(className);
+    body.removeEventListener("animationend", handleAnimationEnd);
+  };
 
-  const duration = status === "error" ? 900 : 650;
-
-  bodyPulseTimeout = setTimeout(() => {
-    body.style.setProperty("--bg-current", "var(--bg-base)");
-    bodyPulseTimeout = null;
-  }, duration);
+  body.addEventListener("animationend", handleAnimationEnd);
 }
