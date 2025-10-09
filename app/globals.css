@@ -1242,3 +1242,31 @@ main > * {
     align-items: flex-start;
   }
 }
+
+@keyframes body-pulse-success {
+  50% {
+    --bg-current: radial-gradient(
+      circle at top,
+      rgba(34, 197, 94, 0.18) 0%,
+      rgba(5, 11, 22, 1) 70%
+    );
+  }
+}
+
+@keyframes body-pulse-error {
+  50% {
+    --bg-current: radial-gradient(
+      circle at top,
+      rgba(248, 113, 113, 0.24) 0%,
+      rgba(5, 11, 22, 1) 70%
+    );
+  }
+}
+
+body.pulse-success {
+  animation: body-pulse-success 800ms ease-in-out;
+}
+
+body.pulse-error {
+  animation: body-pulse-error 950ms ease-in-out;
+}
