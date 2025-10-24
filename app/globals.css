@@ -8,6 +8,8 @@
   --color-accent: #38bdf8;
   --font-inter: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  --bg-pulse-color: rgba(56, 189, 248, 0.35);
+  --bg-pulse-opacity: 0;
 }
 
 * {
@@ -20,10 +22,25 @@ body {
   padding: 0;
   font-family: var(--font-inter);
   --bg-base: radial-gradient(circle at top, #111a2b 0%, #050b16 55%, #030711 100%);
-  background: var(--bg-current, var(--bg-base));
+  background: var(--bg-base);
   color: var(--color-text);
   min-height: 100%;
-  transition: background 600ms ease-out;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at top,
+    color-mix(in srgb, var(--bg-pulse-color) 65%, transparent) 0%,
+    transparent 65%
+  );
+  opacity: var(--bg-pulse-opacity, 0);
+  transition: opacity 600ms ease-out;
+  z-index: -1;
 }
 
 .sr-only {
