@@ -1054,9 +1054,10 @@ main > * {
 }
 
 .item-delete-button[data-state="confirm"] {
-  background: rgba(220, 38, 38, 0.75);
-  border-color: rgba(252, 165, 165, 0.95);
-  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25);
+  background: rgba(22, 101, 52, 0.75);
+  border-color: rgba(134, 239, 172, 0.95);
+  color: rgba(240, 253, 244, 0.95);
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.25);
 }
 
 .item-delete-spinner {
