@@ -596,16 +596,17 @@ function triggerBodyPulse(status: PasteStatus) {
 
   let tint: string | null = null;
   if (status === "success") {
-    tint = "radial-gradient(circle at top, rgba(34, 197, 94, 0.18) 0%, rgba(5, 11, 22, 1) 70%)";
+    tint = "rgba(34, 197, 94, 0.32)";
   } else if (status === "error") {
-    tint = "radial-gradient(circle at top, rgba(248, 113, 113, 0.24) 0%, rgba(5, 11, 22, 1) 70%)";
+    tint = "rgba(248, 113, 113, 0.4)";
   }
 
   if (!tint) {
     return;
   }
 
-  body.style.setProperty("--bg-current", tint);
+  body.style.setProperty("--bg-pulse-color", tint);
+  body.style.setProperty("--bg-pulse-opacity", "1");
 
   if (bodyPulseTimeout) {
     clearTimeout(bodyPulseTimeout);
@@ -614,7 +615,7 @@ function triggerBodyPulse(status: PasteStatus) {
   const duration = status === "error" ? 900 : 650;
 
   bodyPulseTimeout = setTimeout(() => {
-    body.style.setProperty("--bg-current", "var(--bg-base)");
+    body.style.setProperty("--bg-pulse-opacity", "0");
     bodyPulseTimeout = null;
   }, duration);
 }
