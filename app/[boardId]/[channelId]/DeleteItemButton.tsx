@@ -116,10 +116,18 @@ function SpinnerIcon() {
 
 function ConfirmIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2 2 22h20L12 2z" />
-      <line x1="12" y1="9" x2="12" y2="13.5" />
-      <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="8.5 12.5 11.3 15.3 16 9.8" />
     </svg>
   );
 }
