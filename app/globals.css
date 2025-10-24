@@ -26,6 +26,7 @@ body {
   color: var(--color-text);
   min-height: 100%;
   position: relative;
+  isolation: isolate;
 }
 
 body::before {
@@ -40,7 +41,7 @@ body::before {
   );
   opacity: var(--bg-pulse-opacity, 0);
   transition: opacity 600ms ease-out;
-  z-index: -1;
+  z-index: 0;
 }
 
 .sr-only {
