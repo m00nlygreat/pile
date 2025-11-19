@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 /* eslint-disable @next/next/no-img-element */
@@ -9,6 +10,7 @@ import ChannelTabs from "./[channelId]/ChannelTabs";
 import PasteCapture from "./[channelId]/PasteCapture";
 import ViewerNameBadge, { type ViewerProfile } from "./ViewerNameBadge";
 import CopyItemButton from "./CopyItemButton";
+import BoardUrlHeader from "./BoardUrlHeader";
 
 type ItemViewModel = {
   id: string;
@@ -54,6 +56,9 @@ export default function BoardShell({
   allowPlaceholder,
 }: BoardShellProps) {
   const activeChannel = context.activeChannel;
+  const headersList = headers();
+  const boardOrigin = resolveRequestOrigin(headersList);
+  const boardUrl = `${boardOrigin}/${context.board.slug}`;
 
   if (!context.boardExists && !allowPlaceholder) {
     notFound();
@@ -70,7 +75,7 @@ export default function BoardShell({
     <main className="board-shell">
       <header className="board-header">
         <div className="board-header-top">
-          <span className="board-path">/{context.board.slug}</span>
+          <BoardUrlHeader boardUrl={boardUrl} boardSlug={context.board.slug} />
           <ViewerNameBadge profile={viewerProfile} viewerIsAdmin={viewerIsAdmin} />
         </div>
       </header>
@@ -124,6 +129,53 @@ export default function BoardShell({
       )}
     </main>
   );
+}
+
+function resolveRequestOrigin(headersList: Headers): string {
+  const forwardedHost = headersList.get("x-forwarded-host");
+  const host = forwardedHost ?? headersList.get("host");
+  const refererUrl = safeParseUrl(headersList.get("referer"));
+  const configuredOrigin = safeParseUrl(process.env.NEXT_PUBLIC_SITE_URL ?? null);
+  const proto =
+    getForwardedProto(headersList) ??
+    refererUrl?.protocol ??
+    configuredOrigin?.protocol ??
+    "https:";
+  const normalizedProto = proto.replace(/:$/, "");
+  const originFromHost = host ? `${normalizedProto}://${host}` : null;
+  const origin =
+    originFromHost ??
+    refererUrl?.origin ??
+    configuredOrigin?.origin ??
+    "http://localhost:3000";
+  return origin.endsWith("/") ? origin.slice(0, -1) : origin;
+}
+
+function getForwardedProto(headersList: Headers): string | null {
+  const headerNames = ["x-forwarded-proto", "x-forwarded-protocol", "x-url-scheme"];
+  for (const name of headerNames) {
+    const value = headersList.get(name);
+    if (value) {
+      const part = value.split(",")[0]?.trim();
+      if (part) {
+        return part.endsWith(":") ? part : `${part}:`;
+      }
+    }
+  }
+
+  return null;
+}
+
+function safeParseUrl(value: string | null): URL | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
 }
 
 function buildSessionGroups(
