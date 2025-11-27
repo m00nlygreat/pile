@@ -11,6 +11,8 @@ import rehypeExternalLinks from "rehype-external-links";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema, type Options as RehypeSanitizeOptions } from "rehype-sanitize";
 import rehypeReact from "rehype-react";
+import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
+import { MarkdownInlineCode } from "./MarkdownInlineCode";
 
 const markdownSchema: RehypeSanitizeOptions["schema"] = {
   ...defaultSchema,
@@ -47,6 +49,10 @@ const markdownProcessor = unified()
     jsxs,
     development: process.env.NODE_ENV !== "production",
     jsxDEV: jsx,
+    components: {
+      pre: MarkdownCodeBlock,
+      code: MarkdownInlineCode,
+    },
   });
 
 export function MarkdownPreview({
