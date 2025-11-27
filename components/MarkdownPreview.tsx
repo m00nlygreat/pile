@@ -227,8 +227,7 @@ function pushPlain(nodes: ReactNode[], text: string, key: string) {
     return;
   }
 
-  const escaped = escapeHtml(text);
-  const segments = escaped.split("\n");
+  const segments = text.split("\n");
 
   segments.forEach((segment, index) => {
     if (index > 0) {
@@ -238,15 +237,6 @@ function pushPlain(nodes: ReactNode[], text: string, key: string) {
       nodes.push(<Fragment key={`${key}-text-${index}`}>{segment}</Fragment>);
     }
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function sanitizeUrl(url: string): string | null {
