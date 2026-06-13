@@ -1,0 +1,14 @@
+.git
+.next
+node_modules
+data
+out
+mockup
+.next-dev*.log
+*.tsbuildinfo
+.env
+.env*.local
+README.md
+PRD.md
+REQUIREMENT.md
+REQUIREMENT.refined.md
