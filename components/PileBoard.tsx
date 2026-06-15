@@ -353,7 +353,18 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
 
   const toggleAdmin = async () => {
     const enabled = !admin;
-    await fetch("/api/admin/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
+    const password = enabled ? window.prompt("강사 비밀번호를 입력하세요.") : undefined;
+    if (enabled && password === null) return;
+    const res = await fetch("/api/admin/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, password }),
+    });
+    if (!res.ok) {
+      setAdmin(false);
+      toast("비밀번호가 올바르지 않아요", I.shield);
+      return;
+    }
     setAdmin(enabled);
     toast(enabled ? "관리자 모드 · 모든 아이템 관리 가능" : "관리자 모드를 껐어요", I.shield);
   };
