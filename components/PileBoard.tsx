@@ -13,6 +13,7 @@ const ACCENTS = {
   blue: "oklch(0.55 0.10 245)",
 };
 const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+const POLL_FENCE_RE = /(```poll\r?\n[\s\S]*?```)/;
 const PRESET_EMOJIS = ["👍", "❤️", "🔥", "😂", "👀", "✅", "💡", "🤔", "🎉", "😮", "🙏", "⭐"];
 const NAMES = ["느긋한 펭귄", "조용한 다람쥐", "성실한 두루미", "호기심 여우", "단단한 고래", "푸근한 사슴"];
 
@@ -608,7 +609,7 @@ function Placeholder({ label, h = 150 }: { label: string; h?: number }) {
 }
 
 function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense, isNew, isPinned, onTogglePin, style }: { item: ItemRecord; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: Record<string, string[]>; dense?: boolean; isNew?: boolean; isPinned: boolean; onTogglePin: (item: ItemRecord) => void; style?: React.CSSProperties }) {
-  const isPoll = item.type === "text" && /```poll\n/.test(item.body ?? "");
+  const isPoll = item.type === "text" && POLL_FENCE_RE.test(item.body ?? "");
   const effectiveType = isPoll ? "poll" : item.type;
   const TI = effectiveType === "poll" ? I.poll : effectiveType === "link" ? I.link : effectiveType === "file" ? I.file : I.text;
   const canDelete = admin || item.user.id === me.id;
@@ -617,16 +618,16 @@ function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense
     <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type}>
       <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">관리자</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
       <div className="card-body">{item.type === "text" && <TextBody item={item} reactions={reactions} myId={me.id} onReact={onReact} />}{item.type === "link" && item.link && <LinkBody link={item.link} />}{item.type === "file" && item.file && <FileBody file={item.file} />}</div>
-      <Reactions itemId={item.id} reactions={reactions} myId={me.id} onReact={onReact} filterEmojis={POLL_EMOJIS} />
+      <Reactions itemId={item.id} reactions={reactions} myId={me.id} onReact={onReact} />
     </article>
   );
 }
 
 function TextBody({ item, reactions, myId, onReact }: { item: ItemRecord; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {
   const body = item.body ?? "";
-  const parts = body.split(/(```poll\n[\s\S]*?```)/);
+  const parts = body.split(POLL_FENCE_RE);
   if (parts.length === 1) return <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />;
-  const choices = (parts[1] ?? "").replace(/^```poll\n/, "").replace(/```$/, "").split("\n").map((line) => line.match(/^\s*\d+\.\s+(.+)$/)?.[1]?.trim()).filter(Boolean).slice(0, 10) as string[];
+  const choices = (parts[1] ?? "").replace(/^```poll\r?\n/, "").replace(/```$/, "").split("\n").map((line) => line.match(/^\s*\d+\.\s+(.+)$/)?.[1]?.trim()).filter(Boolean).slice(0, 10) as string[];
   return <div className="md">{parts[0]?.trim() && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(parts[0]) }} />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(parts[2]) }} />}</div>;
 }
 
@@ -638,7 +639,7 @@ function PollBlock({ choices, itemId, reactions, myId, onReact }: { choices: str
     const count = (reactions[emoji] ?? []).length;
     const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
     const voted = myVoteEmoji === emoji;
-    return <button key={choice} className={`poll-choice ${voted ? "voted" : ""}`} onClick={() => onReact(itemId, emoji)}><span className="poll-bar" style={{ "--w": `${pct}%` } as React.CSSProperties} /><span className="poll-em">{emoji}</span><span className="poll-text">{choice}</span><span className="poll-count">{count || ""}</span><span className="poll-pct">{totalVotes > 0 ? `${pct}%` : ""}</span></button>;
+    return <button key={`${i}-${choice}`} className={`poll-choice ${voted ? "voted" : ""}`} onClick={() => onReact(itemId, emoji)}><span className="poll-bar" style={{ "--w": `${pct}%` } as React.CSSProperties} /><span className="poll-em">{emoji}</span><span className="poll-text">{choice}</span><span className="poll-count">{count || ""}</span><span className="poll-pct">{totalVotes > 0 ? `${pct}%` : ""}</span></button>;
   })}</div><div className="poll-footer"><span>{totalVotes > 0 ? `총 ${totalVotes}표` : "아직 투표가 없어요"}</span>{myVoteEmoji && <span className="poll-hint">선택됨 · 다시 누르면 취소</span>}</div></div>;
 }
 
@@ -655,7 +656,7 @@ function FileBody({ file }: { file: FilePayload }) {
   return <a className="file-doc" href={file.dataUrl ?? "#"} download={file.name} onClick={(e) => { if (!file.dataUrl) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span><span className="file-dl"><I.download s={16} /></span></a>;
 }
 
-function Reactions({ itemId, reactions, myId, onReact, filterEmojis }: { itemId: string; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void; filterEmojis: string[] }) {
+function Reactions({ itemId, reactions, myId, onReact }: { itemId: string; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -664,7 +665,7 @@ function Reactions({ itemId, reactions, myId, onReact, filterEmojis }: { itemId:
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
-  const entries = Object.entries(reactions).filter(([emoji, ids]) => ids.length > 0 && !filterEmojis.includes(emoji));
+  const entries = Object.entries(reactions).filter(([, ids]) => ids.length > 0);
   return <div className="rxn-row" ref={ref}>{entries.map(([emoji, ids]) => <button key={emoji} className={`rxn-pill ${ids.includes(myId) ? "mine" : ""}`} onClick={() => onReact(itemId, emoji)}><span className="rxn-em">{emoji}</span><span className="rxn-count">{ids.length}</span></button>)}<div className="rxn-add-wrap"><button className={`rxn-add ${open ? "open" : ""}`} title="리액션 추가" onClick={() => setOpen((v) => !v)}>+</button>{open && <div className="rxn-picker">{PRESET_EMOJIS.map((emoji) => <button key={emoji} className="rxn-pick-btn" onClick={() => { onReact(itemId, emoji); setOpen(false); }}>{emoji}</button>)}</div>}</div></div>;
 }
 

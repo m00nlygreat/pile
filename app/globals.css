@@ -261,17 +261,24 @@ kbd {
 .md-pre-bar { display: flex; padding: 6px 12px; background: oklch(0.23 0.012 62); }
 .md-pre-bar span { font-family: var(--mono); font-size: 11px; color: oklch(0.7 0.02 80); }
 .md-pre code { display: block; font-family: var(--mono); padding: 12px 14px; color: oklch(0.9 0.015 85); white-space: pre-wrap; word-break: break-word; overflow-x: auto; line-height: 1.6; }
+.md-pre .hljs-keyword, .md-pre .hljs-selector-tag, .md-pre .hljs-literal { color: oklch(0.78 0.12 305); }
+.md-pre .hljs-string, .md-pre .hljs-regexp, .md-pre .hljs-addition { color: oklch(0.82 0.11 145); }
+.md-pre .hljs-number, .md-pre .hljs-built_in, .md-pre .hljs-symbol { color: oklch(0.82 0.10 75); }
+.md-pre .hljs-title, .md-pre .hljs-section, .md-pre .hljs-function .hljs-title { color: oklch(0.82 0.08 230); }
+.md-pre .hljs-attr, .md-pre .hljs-attribute, .md-pre .hljs-variable, .md-pre .hljs-template-variable { color: oklch(0.84 0.08 195); }
+.md-pre .hljs-comment, .md-pre .hljs-quote, .md-pre .hljs-deletion { color: oklch(0.67 0.02 80); font-style: italic; }
+.md-pre .hljs-meta, .md-pre .hljs-doctag { color: oklch(0.78 0.07 45); }
 .md-table { width: 100%; border-collapse: collapse; margin: .7em 0; font-size: 13px; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
 .md-table th { background: var(--surface-2); text-align: left; font-weight: 620; padding: 7px 11px; border-bottom: 1px solid var(--hair-2); font-size: 12px; color: var(--muted); }
 .md-table td { padding: 7px 11px; border-bottom: 1px solid var(--hair); }
 .md-quote { margin: .6em 0; padding: 6px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; color: var(--muted); font-size: 13.5px; }
 .md-list { margin: .5em 0; padding-left: 1.3em; }
 .md-list li { margin: .2em 0; }
-.md-tasks { list-style: none; padding-left: 0; }
+.md-tasks, .md .contains-task-list { list-style: none; padding-left: 0; }
 .md-task { display: flex; align-items: flex-start; gap: 8px; margin: .32em 0; }
-.md-box { width: 17px; height: 17px; border-radius: 5px; border: 1.5px solid var(--hair-2); display: grid; place-items: center; font-size: 11px; color: white; margin-top: 1px; background: var(--surface); flex: 0 0 auto; }
+.md-box { width: 17px; height: 17px; margin-top: 2px; accent-color: var(--accent); flex: 0 0 auto; }
 .md-task.done .md-box { background: var(--accent); border-color: var(--accent); }
-.md-task.done > span:last-child { color: var(--faint); text-decoration: line-through; }
+.md-task.done { color: var(--faint); text-decoration: line-through; }
 .md-hr { border: none; border-top: 1px solid var(--hair); margin: .8em 0; }
 
 .link-card { display: block; border: 1px solid var(--hair-2); border-radius: 11px; overflow: hidden; text-decoration: none; color: inherit; transition: .15s; }
