@@ -1,10 +1,7 @@
 import type { ChannelRecord } from "@/lib/types";
 
 export const DEFAULT_CHANNELS = [
-  { id: "default", name: "일반" },
-  { id: "homework", name: "과제" },
-  { id: "qna", name: "Q&A" },
-  { id: "resources", name: "자료실" },
+  { id: "default", slug: "default", name: "일반" },
 ];
 
 export const seedChannels = (boardId: string): ChannelRecord[] =>

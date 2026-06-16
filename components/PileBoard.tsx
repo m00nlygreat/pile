@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { useRouter } from "next/navigation";
 import { I } from "@/components/icons";
 import { renderMarkdown } from "@/components/markdown";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
@@ -285,11 +286,16 @@ async function fileToPayload(file: File): Promise<FilePayload> {
   return { name: file.name, mime: file.type || "application/octet-stream", size: file.size, preview: file.type.startsWith("image/") ? "drop" : null, dataUrl };
 }
 
-export function PileBoard({ boardId, initialData }: { boardId: string; initialData: BoardPayload }) {
+function channelPath(boardId: string, slug: string) {
+  return `/${encodeURIComponent(boardId)}/${encodeURIComponent(slug)}`;
+}
+
+export function PileBoard({ boardId, initialChannelSlug = "default", initialData }: { boardId: string; initialChannelSlug?: string; initialData: BoardPayload }) {
+  const router = useRouter();
   const [channels, setChannels] = useState(initialData.channels);
   const [items, setItems] = useState(initialData.items);
   const [reactions, setReactions] = useState(initialData.reactions);
-  const [channel, setChannel] = useState(initialData.channels[0]?.id ?? "default");
+  const [channel, setChannel] = useState(initialData.channels.find((item) => item.slug === initialChannelSlug)?.id ?? initialData.channels[0]?.id ?? "default");
   const [admin, setAdmin] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [newId, setNewId] = useState<string | null>(null);
@@ -301,6 +307,8 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
 
   const displayMe = me ?? { id: "", nick: "익명", display: "익명", admin: false };
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
+  const currentChannel = channels.find((item) => item.id === channel) ?? channels[0];
+  const currentChannelSlug = currentChannel?.slug ?? "default";
   useEffect(() => {
     let cancelled = false;
     fetch("/api/admin/session")
@@ -419,8 +427,13 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
     const next = (await res.json()) as ChannelRecord;
     setChannels((prev) => [...prev, next]);
     setChannel(next.id);
+    router.push(channelPath(boardId, next.slug));
     toast(`#${name} 채널을 만들었어요`, I.hash);
   };
+  const pickChannel = useCallback((next: ChannelRecord) => {
+    setChannel(next.id);
+    router.push(channelPath(boardId, next.slug));
+  }, [boardId, router]);
   const togglePin = async (item: ItemRecord) => {
     const pinned = !item.pinned;
     const res = await fetch(`/api/items/${encodeURIComponent(item.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned }) });
@@ -483,10 +496,11 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
       }}
     >
       <Topbar boardId={boardId} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onCopyUrl={() => {
-        navigator.clipboard?.writeText(`https://pile.so/${boardId}`).catch(() => undefined);
-        toast("보드 URL을 복사했어요", I.share);
+        const origin = window.location.origin;
+        navigator.clipboard?.writeText(`${origin}${channelPath(boardId, currentChannelSlug)}`).catch(() => undefined);
+        toast("채널 URL을 복사했어요", I.share);
       }} />
-      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={setChannel} onAdd={addChannel} />
+      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
           <Composer onSubmit={submitText} />
@@ -549,14 +563,14 @@ function Topbar({ boardId, me, admin, peers, status, onToggleAdmin, onRename, on
   );
 }
 
-function Channels({ channels, current, counts, admin, onPick, onAdd }: { channels: ChannelRecord[]; current: string; counts: Record<string, number>; admin: boolean; onPick: (id: string) => void; onAdd: (name: string) => void }) {
+function Channels({ channels, current, counts, admin, onPick, onAdd }: { channels: ChannelRecord[]; current: string; counts: Record<string, number>; admin: boolean; onPick: (channel: ChannelRecord) => void; onAdd: (name: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [val, setVal] = useState("");
   return (
     <nav className="channels">
       <div className="ch-scroll">
         {channels.map((channel) => (
-          <button key={channel.id} className={`chip ${current === channel.id ? "on" : ""}`} onClick={() => onPick(channel.id)}><I.hash s={13} />{channel.name}{counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}</button>
+          <button key={channel.id} className={`chip ${current === channel.id ? "on" : ""}`} onClick={() => onPick(channel)}><I.hash s={13} />{channel.name}{counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}</button>
         ))}
         {admin && (adding ? (
           <span className="ch-add-edit"><input autoFocus value={val} placeholder="채널 이름" onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => {

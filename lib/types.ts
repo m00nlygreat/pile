@@ -10,6 +10,7 @@ export type UserRecord = {
 export type ChannelRecord = {
   id: string;
   boardId: string;
+  slug: string;
   name: string;
   position: number;
 };

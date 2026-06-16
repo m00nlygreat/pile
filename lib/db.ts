@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { cookies } from "next/headers";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
+import { slugFromChannelName, uniqueSlug } from "@/lib/slug";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 const DB_PATH = process.env.PILE_DB_PATH || join(process.cwd(), "data", "pile.sqlite");
@@ -28,6 +29,7 @@ function getDb() {
       CREATE TABLE IF NOT EXISTS channels (
         id TEXT NOT NULL,
         board_id TEXT NOT NULL,
+        slug TEXT NOT NULL DEFAULT '',
         name TEXT NOT NULL,
         position INTEGER NOT NULL,
         PRIMARY KEY (board_id, id)
@@ -61,6 +63,7 @@ function getDb() {
         PRIMARY KEY (board_id, user_id)
       );
     `);
+    migrateChannelSlugs(db);
     migrateUserProfiles(db);
   }
   return db;
@@ -76,6 +79,27 @@ function tryJson<T>(value: unknown): T | null {
   } catch {
     return null;
   }
+}
+
+function migrateChannelSlugs(conn: DatabaseSync) {
+  const columns = conn.prepare("PRAGMA table_info(channels)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "slug")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN slug TEXT NOT NULL DEFAULT ''");
+  }
+  const rows = conn
+    .prepare("SELECT id, board_id as boardId, name, slug, position FROM channels ORDER BY board_id ASC, position ASC")
+    .all() as { id: string; boardId: string; name: string; slug: string; position: number }[];
+  const usedByBoard = new Map<string, Set<string>>();
+  const update = conn.prepare("UPDATE channels SET slug = ? WHERE board_id = ? AND id = ?");
+  rows.forEach((row) => {
+    const used = usedByBoard.get(row.boardId) ?? new Set<string>();
+    usedByBoard.set(row.boardId, used);
+    const base = row.id === "default" ? "default" : slugFromChannelName(row.name);
+    const current = row.slug?.trim();
+    const slug = current && !used.has(current.toLowerCase()) ? current : uniqueSlug(base, used);
+    used.add(slug.toLowerCase());
+    if (slug !== current) update.run(slug, row.boardId, row.id);
+  });
 }
 
 function migrateUserProfiles(conn: DatabaseSync) {
@@ -133,8 +157,8 @@ export function ensureBoard(boardId: string) {
   const exists = conn.prepare("SELECT id FROM boards WHERE id = ?").get(boardId);
   if (exists) return;
   conn.prepare("INSERT INTO boards (id, display_name, created_at) VALUES (?, ?, ?)").run(boardId, boardId, Date.now());
-  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, name, position) VALUES (?, ?, ?, ?)");
-  seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.name, channel.position));
+  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, position) VALUES (?, ?, ?, ?, ?)");
+  seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.slug, channel.name, channel.position));
 }
 
 function boardExists(boardId: string) {
@@ -151,11 +175,12 @@ export function getBoardPayload(boardId: string): BoardPayload {
   }
   const board = boardRow ? { id: String(boardRow.id), displayName: String(boardRow.displayName) } : undefined;
   const channelRows = conn
-    .prepare("SELECT id, board_id as boardId, name, position FROM channels WHERE board_id = ? ORDER BY position ASC")
+    .prepare("SELECT id, board_id as boardId, slug, name, position FROM channels WHERE board_id = ? ORDER BY position ASC")
     .all(boardId) as ChannelRecord[];
   const channels: ChannelRecord[] = channelRows.map((row) => ({
     id: String(row.id),
     boardId: String(row.boardId),
+    slug: String(row.slug),
     name: String(row.name),
     position: Number(row.position),
   }));
@@ -202,14 +227,24 @@ export function createChannel(boardId: string, name: string) {
   ensureBoard(boardId);
   const conn = getDb();
   const maxRow = conn.prepare("SELECT COALESCE(MAX(position), -1) as maxPos FROM channels WHERE board_id = ?").get(boardId) as { maxPos: number };
-  const channel = { id: uid("ch"), boardId, name, position: maxRow.maxPos + 1 };
-  conn.prepare("INSERT INTO channels (id, board_id, name, position) VALUES (?, ?, ?, ?)").run(
+  const existing = conn.prepare("SELECT slug FROM channels WHERE board_id = ?").all(boardId) as { slug: string }[];
+  const slug = uniqueSlug(slugFromChannelName(name), existing.map((channel) => channel.slug));
+  const channel = { id: uid("ch"), boardId, slug, name, position: maxRow.maxPos + 1 };
+  conn.prepare("INSERT INTO channels (id, board_id, slug, name, position) VALUES (?, ?, ?, ?, ?)").run(
     channel.id,
     channel.boardId,
+    channel.slug,
     channel.name,
     channel.position,
   );
   return channel;
+}
+
+export function channelSlugExists(boardId: string, channelSlug: string) {
+  if (!boardExists(boardId)) {
+    return seedChannels(boardId).some((channel) => channel.slug === channelSlug);
+  }
+  return Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND slug = ?").get(boardId, channelSlug));
 }
 
 export function upsertBoardUser(boardId: string, user: UserRecord) {
