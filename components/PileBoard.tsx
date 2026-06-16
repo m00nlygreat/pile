@@ -118,8 +118,13 @@ function saveBoardUser(boardId: string, user: UserRecord) {
   }).catch(() => undefined);
 }
 
+function createLocalUser() {
+  const name = NAMES[Math.floor(Math.random() * NAMES.length)];
+  return { id: uid("me"), nick: name, display: name, admin: false };
+}
+
 function useLocalUser(boardId: string) {
-  const [me, setMe] = useState<UserRecord>({ id: "me", nick: NAMES[0], display: NAMES[0], admin: false });
+  const [me, setMe] = useState<UserRecord | null>(null);
   useEffect(() => {
     const key = `pile:user:${boardId}`;
     const saved = localStorage.getItem(key);
@@ -128,14 +133,6 @@ function useLocalUser(boardId: string) {
       const next = { ...user, admin: false };
       localStorage.setItem(key, JSON.stringify(next));
       setMe(next);
-      saveBoardUser(boardId, next);
-    }
-    else {
-      const name = NAMES[Math.floor(Math.random() * NAMES.length)];
-      const next = { id: uid("me"), nick: name, display: name, admin: false };
-      localStorage.setItem(key, JSON.stringify(next));
-      setMe(next);
-      saveBoardUser(boardId, next);
     }
   }, [boardId]);
   const update = useCallback((next: UserRecord) => {
@@ -145,7 +142,16 @@ function useLocalUser(boardId: string) {
     setMe(user);
     saveBoardUser(boardId, user);
   }, [boardId]);
-  return [me, update] as const;
+  const ensure = useCallback(() => {
+    if (me) return me;
+    const key = `pile:user:${boardId}`;
+    const saved = localStorage.getItem(key);
+    const next = saved ? { ...(JSON.parse(saved) as UserRecord), admin: false } : createLocalUser();
+    localStorage.setItem(key, JSON.stringify(next));
+    setMe(next);
+    return next;
+  }, [boardId, me]);
+  return [me, update, ensure] as const;
 }
 
 function useTweaks() {
@@ -286,13 +292,14 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
   const [admin, setAdmin] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [newId, setNewId] = useState<string | null>(null);
-  const [me, setMe] = useLocalUser(boardId);
+  const [me, setMe, ensureMe] = useLocalUser(boardId);
   const [tweaks, setTweak] = useTweaks();
   const [toasts, toast] = useToasts();
   const feedRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
 
-  const me2 = admin ? { ...me, admin: true, id: me.id, nick: me.nick, display: me.display || me.nick } : me;
+  const displayMe = me ?? { id: "", nick: "익명", display: "익명", admin: false };
+  const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
   useEffect(() => {
     let cancelled = false;
     fetch("/api/admin/session")
@@ -327,10 +334,12 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
   const dense = tweaks.density === "compact";
 
   const postItem = async (payload: { type: ItemRecord["type"]; body?: string; link?: LinkPayload; file?: FilePayload }) => {
+    const author = ensureMe();
+    const user = admin ? { ...author, admin: true, display: author.display || author.nick } : author;
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, channel, user: me2 }),
+      body: JSON.stringify({ ...payload, channel, user }),
     });
     if (!res.ok) {
       toast("올릴 수 없어요", I.file);
@@ -419,7 +428,8 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
     toast(pinned ? "상단에 고정했어요" : "고정을 해제했어요", I.pin);
   };
   const deleteItem = async (item: ItemRecord) => {
-    const res = await fetch(`/api/items/${encodeURIComponent(item.id)}?userId=${encodeURIComponent(me2.id)}`, { method: "DELETE" });
+    const user = ensureMe();
+    const res = await fetch(`/api/items/${encodeURIComponent(item.id)}?userId=${encodeURIComponent(user.id)}`, { method: "DELETE" });
     if (!res.ok) return toast("삭제 권한이 없어요", I.trash);
     setItems((prev) => prev.filter((old) => old.id !== item.id));
     toast(item.type === "file" ? "파일과 함께 삭제했어요" : "삭제했어요", I.trash);
@@ -430,18 +440,20 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
     toast("클립보드에 복사했어요", I.copy);
   };
   const react = async (itemId: string, emoji: string) => {
+    const user = ensureMe();
     const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/reactions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emoji, userId: me2.id, boardId }),
+      body: JSON.stringify({ emoji, userId: user.id, boardId }),
     });
     if (res.ok) setReactions(((await res.json()) as { reactions: BoardPayload["reactions"] }).reactions);
   };
   const renameMe = useCallback((display: string) => {
-    const next = { ...me, display };
+    const current = ensureMe();
+    const next = { ...current, display };
     setMe(next);
-    setItems((prev) => prev.map((item) => (item.user.id === me.id ? { ...item, user: { ...item.user, nick: next.nick, display: next.display } } : item)));
-  }, [me, setMe]);
+    setItems((prev) => prev.map((item) => (item.user.id === current.id ? { ...item, user: { ...item.user, nick: next.nick, display: next.display } } : item)));
+  }, [ensureMe, setMe]);
 
   return (
     <div

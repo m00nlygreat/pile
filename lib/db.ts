@@ -137,12 +137,18 @@ export function ensureBoard(boardId: string) {
   seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.name, channel.position));
 }
 
+function boardExists(boardId: string) {
+  return Boolean(getDb().prepare("SELECT 1 FROM boards WHERE id = ?").get(boardId));
+}
+
 export function getBoardPayload(boardId: string): BoardPayload {
-  ensureBoard(boardId);
   const conn = getDb();
   const boardRow = conn.prepare("SELECT id, display_name as displayName FROM boards WHERE id = ?").get(boardId) as
     | { id: string; displayName: string }
     | undefined;
+  if (!boardRow) {
+    return { board: { id: boardId, displayName: boardId }, channels: seedChannels(boardId), items: [], reactions: {} };
+  }
   const board = boardRow ? { id: String(boardRow.id), displayName: String(boardRow.displayName) } : undefined;
   const channelRows = conn
     .prepare("SELECT id, board_id as boardId, name, position FROM channels WHERE board_id = ? ORDER BY position ASC")
@@ -207,9 +213,9 @@ export function createChannel(boardId: string, name: string) {
 }
 
 export function upsertBoardUser(boardId: string, user: UserRecord) {
-  ensureBoard(boardId);
   const nick = user.nick || user.display || "익명";
   const display = user.display || nick;
+  if (!boardExists(boardId)) return { ...user, nick, display, admin: false };
   getDb()
     .prepare(`
       INSERT INTO board_users (board_id, user_id, nick, display, updated_at)
@@ -284,7 +290,6 @@ export function toggleReaction(itemId: string, emoji: string, userId: string) {
 }
 
 export function defaultChannelExists(boardId: string, channelId: string) {
-  ensureBoard(boardId);
   return (
     DEFAULT_CHANNELS.some((channel) => channel.id === channelId) ||
     Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ?").get(boardId, channelId))
