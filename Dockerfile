@@ -27,7 +27,9 @@ ENV PILE_DB_PATH=/app/data/pile.sqlite
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
 COPY package.json package-lock.json next.config.mjs ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN apk add --no-cache su-exec \
+  && npm ci --omit=dev \
+  && npm cache clean --force
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/app ./app
@@ -35,11 +37,13 @@ COPY --from=builder /app/components ./components
 COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/next-env.d.ts ./next-env.d.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
-RUN mkdir -p /app/data && chown -R nextjs:nodejs /app/data /app/.next
-
-USER nextjs
+RUN mkdir -p /app/data \
+  && chown -R nextjs:nodejs /app/data /app/.next \
+  && chmod +x ./docker-entrypoint.sh
 
 EXPOSE 3000
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]

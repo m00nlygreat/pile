@@ -10,8 +10,14 @@ let db: DatabaseSync | null = null;
 
 function getDb() {
   if (!db) {
-    mkdirSync(dirname(DB_PATH), { recursive: true });
-    db = new DatabaseSync(DB_PATH);
+    const dbDir = dirname(DB_PATH);
+    try {
+      mkdirSync(dbDir, { recursive: true });
+      db = new DatabaseSync(DB_PATH);
+    } catch (error) {
+      console.error("[pile] Failed to open SQLite database", { dbPath: DB_PATH, dbDir });
+      throw error;
+    }
     db.exec("PRAGMA journal_mode = WAL");
     db.exec(`
       CREATE TABLE IF NOT EXISTS boards (
