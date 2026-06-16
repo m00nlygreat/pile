@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createItem, defaultChannelExists } from "@/lib/db";
+import { enrichLink } from "@/lib/link-meta";
 import type { FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -50,6 +51,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
   if (body.type === "file" && (!body.file?.name || body.file.size > MAX_FILE_BYTES)) {
     return NextResponse.json({ error: "파일이 없거나 20MB를 초과했습니다." }, { status: 400 });
   }
+  const link = body.type === "link" && body.link
+    ? await enrichLink(body.link).catch(() => body.link)
+    : undefined;
   const item = createItem(boardId, {
     channel,
     type: body.type,
@@ -57,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
     session: Date.now(),
     t: Date.now(),
     body: body.type === "text" ? body.body : undefined,
-    link: body.type === "link" ? body.link : undefined,
+    link,
     file: body.type === "file" ? body.file : undefined,
   });
   return NextResponse.json(item);

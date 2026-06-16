@@ -3,6 +3,7 @@ node_modules/
 out/
 data/*.sqlite
 data/*.sqlite-*
+data/link-images/
 .next-dev*.log
 *.tsbuildinfo
 .env

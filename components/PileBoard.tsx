@@ -47,7 +47,19 @@ function isUrl(s: string) {
 }
 
 function ytId(url: string) {
-  return url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/)?.[1] ?? null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "youtu.be") return u.pathname.split("/").filter(Boolean)[0]?.match(/^[\w-]{11}$/)?.[0] ?? null;
+    if (!["youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com"].includes(host)) return null;
+    const paramId = u.searchParams.get("v");
+    if (paramId?.match(/^[\w-]{11}$/)) return paramId;
+    const [kind, id] = u.pathname.split("/").filter(Boolean);
+    if (["embed", "shorts", "live"].includes(kind) && id?.match(/^[\w-]{11}$/)) return id;
+    return null;
+  } catch {
+    return url.match(/(?:youtube\.com\/(?:watch\?.*?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/i)?.[1] ?? null;
+  }
 }
 
 function siteOf(url: string) {
@@ -273,7 +285,7 @@ function buildLink(url: string): LinkPayload {
   const site = yt ? "youtube.com" : siteOf(url);
   return yt
     ? { url, title: "붙여넣은 영상", site, youtube: yt }
-    : { url, title: `${site} 에서 가져온 링크`, site, desc: "메타데이터를 불러오는 중입니다. 가져오지 못하면 원본 URL이 유지됩니다.", image: "og" };
+    : { url, title: url, site };
 }
 
 async function fileToPayload(file: File): Promise<FilePayload> {
@@ -689,8 +701,8 @@ function PollBlock({ choices, itemId, reactions, myId, onReact }: { choices: str
 
 function LinkBody({ link }: { link: LinkPayload }) {
   const yt = link.youtube || ytId(link.url);
-  if (yt) return <a className="link-yt" href={link.url} target="_blank" rel="noopener noreferrer"><div className="yt-thumb"><Placeholder label="YouTube 임베드 · video embed" h={184} /><span className="yt-play"><I.play s={22} /></span><span className="yt-badge">youtube.com</span></div><span className="yt-title">{link.title}</span></a>;
-  return <a className="link-card" href={link.url} target="_blank" rel="noopener noreferrer">{link.image && <div className="link-img"><Placeholder label="대표 이미지 · og:image" h={132} /></div>}<div className="link-meta"><span className="link-site"><I.link s={12} />{link.site}</span><span className="link-title">{link.title}</span>{link.desc && <span className="link-desc">{link.desc}</span>}<span className="link-url">{link.url}</span></div></a>;
+  if (yt) return <div className="link-yt"><div className="yt-embed"><iframe src={`https://www.youtube.com/embed/${yt}`} title={link.title || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen loading="lazy" referrerPolicy="strict-origin-when-cross-origin" /><span className="yt-badge">youtube.com</span></div><a className="yt-title" href={link.url} target="_blank" rel="noopener noreferrer">{link.title}</a></div>;
+  return <a className="link-card" href={link.url} target="_blank" rel="noopener noreferrer">{link.image && <div className="link-img"><img className="link-preview" src={link.image} alt="" loading="lazy" /></div>}<div className="link-meta"><span className="link-site"><I.link s={12} />{link.site}</span><span className="link-title">{link.title}</span>{link.desc && <span className="link-desc">{link.desc}</span>}<span className="link-url">{link.url}</span></div></a>;
 }
 
 function FileBody({ file }: { file: FilePayload }) {
