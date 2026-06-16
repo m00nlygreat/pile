@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
 import { I } from "@/components/icons";
 import { renderMarkdown } from "@/components/markdown";
@@ -302,6 +303,8 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const [me, setMe, ensureMe] = useLocalUser(boardId);
   const [tweaks, setTweak] = useTweaks();
   const [toasts, toast] = useToasts();
+  const [showShare, setShowShare] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
   const feedRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
 
@@ -309,6 +312,9 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
   const currentChannel = channels.find((item) => item.id === channel) ?? channels[0];
   const currentChannelSlug = currentChannel?.slug ?? "default";
+  useEffect(() => {
+    setShareUrl(`${window.location.origin}${channelPath(boardId, currentChannelSlug)}`);
+  }, [boardId, currentChannelSlug]);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/admin/session")
@@ -495,11 +501,8 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         }
       }}
     >
-      <Topbar boardId={boardId} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onCopyUrl={() => {
-        const origin = window.location.origin;
-        navigator.clipboard?.writeText(`${origin}${channelPath(boardId, currentChannelSlug)}`).catch(() => undefined);
-        toast("채널 URL을 복사했어요", I.share);
-      }} />
+      <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} />
+      {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
@@ -534,14 +537,41 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   );
 }
 
-function Topbar({ boardId, me, admin, peers, status, onToggleAdmin, onRename, onCopyUrl }: { boardId: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onCopyUrl: () => void }) {
+function UrlModal({ url, onClose }: { url: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(url).catch(() => undefined);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-qr"><QRCodeSVG value={url} size={400} /></div>
+        <p className="modal-url">{url}</p>
+        <div className="modal-actions">
+          <button className="btn-pri" onClick={copy}><I.copy s={14} />{copied ? "복사됨!" : "주소 복사"}</button>
+          <button className="btn-ghost" onClick={onClose}>닫기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, onRename, onShare }: { boardId: string; shareUrl: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onShare: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.display);
+  const host = shareUrl ? new URL(shareUrl).host : "";
   return (
     <header className="topbar">
       <div className="tb-left">
         <span className="logo"><span className="logo-mark"><span /><span /><span /></span>pile</span>
-        <button className="board-url" onClick={onCopyUrl} title="보드 URL 복사"><span className="bu-host">pile.so/</span><span className="bu-id">{boardId}</span><I.copy s={13} /></button>
+        <button className="board-url" onClick={onShare} title="보드 URL 공유"><span className="bu-host">{host ? `${host}/` : ""}</span><span className="bu-id">{boardId}</span><I.share s={13} /></button>
       </div>
       <div className="tb-right">
         <PeerPips peers={peers} />

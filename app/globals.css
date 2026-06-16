@@ -205,6 +205,35 @@ kbd {
 .btn-pri { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: white; background: var(--accent); padding: 7px 14px; border-radius: 9px; box-shadow: 0 2px 8px -3px var(--accent); }
 .btn-pri:disabled { opacity: .4; cursor: default; box-shadow: none; }
 
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 200;
+  background: oklch(0.25 0.02 70 / .45);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  border-radius: 28px;
+  padding: 42px 42px 34px;
+  box-shadow: 0 24px 64px -16px oklch(0.3 0.04 60 / .4);
+  display: flex; flex-direction: column; align-items: center; gap: 20px;
+  max-width: 600px; width: min(94vw, 600px);
+}
+.modal-qr { padding: 22px; background: white; border-radius: 20px; line-height: 0; }
+.modal-qr svg { display: block; width: min(400px, calc(94vw - 128px)); height: auto; }
+.modal-url {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 24px;
+  color: var(--muted);
+  word-break: break-all;
+  text-align: center;
+  line-height: 1.35;
+  max-width: 100%;
+}
+.modal-actions { display: flex; gap: 8px; }
+
 .session { margin-top: 18px; }
 .session-head { display: flex; align-items: center; gap: 11px; padding: 6px 2px 14px; }
 .session-date-lbl { font-weight: 660; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--hair-2); padding: 3px 13px; border-radius: 999px; box-shadow: var(--shadow-card); }
