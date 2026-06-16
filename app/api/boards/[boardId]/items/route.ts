@@ -8,7 +8,16 @@ export const dynamic = "force-dynamic";
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 function validUser(value: unknown): value is UserRecord {
-  return Boolean(value && typeof value === "object" && "id" in value && "nick" in value && "display" in value);
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "id" in value &&
+      "nick" in value &&
+      "display" in value &&
+      typeof value.id === "string" &&
+      typeof value.nick === "string" &&
+      typeof value.display === "string",
+  );
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ boardId: string }> }) {

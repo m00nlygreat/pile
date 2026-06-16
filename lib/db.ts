@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { cookies } from "next/headers";
 import { DatabaseSync } from "node:sqlite";
-import { DEFAULT_CHANNELS, seedChannels, seedItems, seedReactions } from "@/lib/seed";
+import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 const DB_PATH = join(process.cwd(), "data", "pile.sqlite");
@@ -31,6 +31,7 @@ function getDb() {
         board_id TEXT NOT NULL,
         channel TEXT NOT NULL,
         type TEXT NOT NULL,
+        user_id TEXT,
         user_json TEXT NOT NULL,
         session INTEGER NOT NULL,
         t INTEGER NOT NULL,
@@ -45,13 +46,61 @@ function getDb() {
         user_id TEXT NOT NULL,
         PRIMARY KEY (item_id, emoji, user_id)
       );
+      CREATE TABLE IF NOT EXISTS board_users (
+        board_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        nick TEXT NOT NULL,
+        display TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (board_id, user_id)
+      );
     `);
+    migrateUserProfiles(db);
   }
   return db;
 }
 
 function json<T>(value: unknown): T {
   return JSON.parse(String(value)) as T;
+}
+
+function tryJson<T>(value: unknown): T | null {
+  try {
+    return json<T>(value);
+  } catch {
+    return null;
+  }
+}
+
+function migrateUserProfiles(conn: DatabaseSync) {
+  const columns = conn.prepare("PRAGMA table_info(items)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "user_id")) {
+    conn.exec("ALTER TABLE items ADD COLUMN user_id TEXT");
+  }
+  const rows = conn.prepare("SELECT id, board_id, user_json, t FROM items WHERE user_id IS NULL OR user_id = ''").all() as {
+    id: string;
+    board_id: string;
+    user_json: string;
+    t: number;
+  }[];
+  const updateItem = conn.prepare("UPDATE items SET user_id = ? WHERE id = ?");
+  const upsertUser = conn.prepare(`
+    INSERT INTO board_users (board_id, user_id, nick, display, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(board_id, user_id) DO UPDATE SET
+      nick = excluded.nick,
+      display = excluded.display,
+      updated_at = excluded.updated_at
+    WHERE excluded.updated_at >= board_users.updated_at
+  `);
+  rows.forEach((row) => {
+    const user = tryJson<UserRecord>(row.user_json);
+    if (!user?.id) return;
+    const nick = user.nick || user.display || "익명";
+    const display = user.display || nick;
+    updateItem.run(user.id, row.id);
+    upsertUser.run(row.board_id, user.id, nick, display, Number(row.t) || Date.now());
+  });
 }
 
 function uid(prefix: string) {
@@ -80,31 +129,6 @@ export function ensureBoard(boardId: string) {
   conn.prepare("INSERT INTO boards (id, display_name, created_at) VALUES (?, ?, ?)").run(boardId, boardId, Date.now());
   const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, name, position) VALUES (?, ?, ?, ?)");
   seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.name, channel.position));
-  if (boardId === "frontend-101") {
-    const insertItem = conn.prepare(`
-      INSERT INTO items (id, board_id, channel, type, user_json, session, t, body, link_json, file_json, pinned)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    seedItems(boardId).forEach((item) => {
-      insertItem.run(
-        item.id,
-        item.boardId,
-        item.channel,
-        item.type,
-        JSON.stringify(item.user),
-        item.session,
-        item.t,
-        item.body ?? null,
-        item.link ? JSON.stringify(item.link) : null,
-        item.file ? JSON.stringify(item.file) : null,
-        item.pinned ? 1 : 0,
-      );
-    });
-    const insertReaction = conn.prepare("INSERT OR IGNORE INTO reactions (item_id, emoji, user_id) VALUES (?, ?, ?)");
-    Object.entries(seedReactions).forEach(([itemId, byEmoji]) => {
-      Object.entries(byEmoji).forEach(([emoji, users]) => users.forEach((userId) => insertReaction.run(itemId, emoji, userId)));
-    });
-  }
 }
 
 export function getBoardPayload(boardId: string): BoardPayload {
@@ -126,19 +150,30 @@ export function getBoardPayload(boardId: string): BoardPayload {
   const itemRows = conn
     .prepare("SELECT * FROM items WHERE board_id = ? ORDER BY t DESC")
     .all(boardId) as Record<string, unknown>[];
-  const items: ItemRecord[] = itemRows.map((row) => ({
-    id: String(row.id),
-    boardId: String(row.board_id),
-    channel: String(row.channel),
-    type: row.type as ItemRecord["type"],
-    user: json<UserRecord>(row.user_json),
-    session: Number(row.session),
-    t: Number(row.t),
-    body: row.body == null ? undefined : String(row.body),
-    link: row.link_json == null ? undefined : json<LinkPayload>(row.link_json),
-    file: row.file_json == null ? undefined : json<FilePayload>(row.file_json),
-    pinned: Number(row.pinned) === 1,
-  }));
+  const userRows = conn
+    .prepare("SELECT user_id as userId, nick, display FROM board_users WHERE board_id = ?")
+    .all(boardId) as { userId: string; nick: string; display: string }[];
+  const users = new Map(userRows.map((user) => [String(user.userId), user]));
+  const items: ItemRecord[] = itemRows.map((row) => {
+    const fallbackUser = json<UserRecord>(row.user_json);
+    const userId = String(row.user_id || fallbackUser.id);
+    const profile = users.get(userId);
+    const nick = profile?.nick || fallbackUser.nick;
+    const display = profile?.display || fallbackUser.display || nick;
+    return {
+      id: String(row.id),
+      boardId: String(row.board_id),
+      channel: String(row.channel),
+      type: row.type as ItemRecord["type"],
+      user: { ...fallbackUser, id: userId, nick, display },
+      session: Number(row.session),
+      t: Number(row.t),
+      body: row.body == null ? undefined : String(row.body),
+      link: row.link_json == null ? undefined : json<LinkPayload>(row.link_json),
+      file: row.file_json == null ? undefined : json<FilePayload>(row.file_json),
+      pinned: Number(row.pinned) === 1,
+    };
+  });
   const reactionRows = conn
     .prepare("SELECT item_id as itemId, emoji, user_id as userId FROM reactions WHERE item_id IN (SELECT id FROM items WHERE board_id = ?)")
     .all(boardId) as { itemId: string; emoji: string; userId: string }[];
@@ -165,8 +200,26 @@ export function createChannel(boardId: string, name: string) {
   return channel;
 }
 
+export function upsertBoardUser(boardId: string, user: UserRecord) {
+  ensureBoard(boardId);
+  const nick = user.nick || user.display || "익명";
+  const display = user.display || nick;
+  getDb()
+    .prepare(`
+      INSERT INTO board_users (board_id, user_id, nick, display, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(board_id, user_id) DO UPDATE SET
+        nick = excluded.nick,
+        display = excluded.display,
+        updated_at = excluded.updated_at
+    `)
+    .run(boardId, user.id, nick, display, Date.now());
+  return { ...user, nick, display, admin: false };
+}
+
 export function createItem(boardId: string, input: Omit<ItemRecord, "id" | "boardId" | "pinned"> & { id?: string }) {
   ensureBoard(boardId);
+  upsertBoardUser(boardId, input.user);
   const item: ItemRecord = {
     ...input,
     id: input.id ?? uid("it"),
@@ -175,13 +228,14 @@ export function createItem(boardId: string, input: Omit<ItemRecord, "id" | "boar
   };
   getDb()
     .prepare(
-      "INSERT INTO items (id, board_id, channel, type, user_json, session, t, body, link_json, file_json, pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+      "INSERT INTO items (id, board_id, channel, type, user_id, user_json, session, t, body, link_json, file_json, pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
     )
     .run(
       item.id,
       item.boardId,
       item.channel,
       item.type,
+      item.user.id,
       JSON.stringify(item.user),
       item.session,
       item.t,
@@ -198,9 +252,9 @@ export function setPinned(itemId: string, pinned: boolean) {
 
 export function deleteItem(itemId: string, userId: string, admin: boolean) {
   const conn = getDb();
-  const row = conn.prepare("SELECT user_json FROM items WHERE id = ?").get(itemId) as { user_json: string } | undefined;
+  const row = conn.prepare("SELECT user_id, user_json FROM items WHERE id = ?").get(itemId) as { user_id?: string; user_json: string } | undefined;
   if (!row) return { ok: true, deleted: false };
-  const owner = json<UserRecord>(row.user_json).id;
+  const owner = row.user_id || json<UserRecord>(row.user_json).id;
   if (!admin && owner !== userId) return { ok: false, deleted: false };
   conn.prepare("DELETE FROM reactions WHERE item_id = ?").run(itemId);
   conn.prepare("DELETE FROM items WHERE id = ?").run(itemId);

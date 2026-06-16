@@ -110,22 +110,41 @@ function useToasts() {
   return [toasts, push] as const;
 }
 
-function useLocalUser() {
+function saveBoardUser(boardId: string, user: UserRecord) {
+  fetch(`/api/boards/${encodeURIComponent(boardId)}/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(user),
+  }).catch(() => undefined);
+}
+
+function useLocalUser(boardId: string) {
   const [me, setMe] = useState<UserRecord>({ id: "me", nick: NAMES[0], display: NAMES[0], admin: false });
   useEffect(() => {
-    const saved = localStorage.getItem("pile:user");
-    if (saved) setMe(JSON.parse(saved) as UserRecord);
+    const key = `pile:user:${boardId}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const user = JSON.parse(saved) as UserRecord;
+      const next = { ...user, admin: false };
+      localStorage.setItem(key, JSON.stringify(next));
+      setMe(next);
+      saveBoardUser(boardId, next);
+    }
     else {
       const name = NAMES[Math.floor(Math.random() * NAMES.length)];
       const next = { id: uid("me"), nick: name, display: name, admin: false };
-      localStorage.setItem("pile:user", JSON.stringify(next));
+      localStorage.setItem(key, JSON.stringify(next));
       setMe(next);
+      saveBoardUser(boardId, next);
     }
-  }, []);
+  }, [boardId]);
   const update = useCallback((next: UserRecord) => {
-    localStorage.setItem("pile:user", JSON.stringify(next));
-    setMe(next);
-  }, []);
+    const key = `pile:user:${boardId}`;
+    const user = { ...next, admin: false };
+    localStorage.setItem(key, JSON.stringify(user));
+    setMe(user);
+    saveBoardUser(boardId, user);
+  }, [boardId]);
   return [me, update] as const;
 }
 
@@ -267,13 +286,25 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
   const [admin, setAdmin] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [newId, setNewId] = useState<string | null>(null);
-  const [me, setMe] = useLocalUser();
+  const [me, setMe] = useLocalUser(boardId);
   const [tweaks, setTweak] = useTweaks();
   const [toasts, toast] = useToasts();
   const feedRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
 
   const me2 = admin ? { ...me, admin: true, id: me.id, nick: me.nick, display: me.display || me.nick } : me;
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/session")
+      .then((res) => (res.ok ? res.json() as Promise<{ admin?: boolean }> : null))
+      .then((data) => {
+        if (!cancelled && data) setAdmin(Boolean(data.admin));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const addItem = useCallback((item: ItemRecord) => {
     setItems((prev) => (prev.some((old) => old.id === item.id) ? prev : [item, ...prev]));
     setNewId(item.id);
@@ -353,7 +384,7 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
 
   const toggleAdmin = async () => {
     const enabled = !admin;
-    const password = enabled ? window.prompt("강사 비밀번호를 입력하세요.") : undefined;
+    const password = enabled ? window.prompt("관리자 비밀번호를 입력하세요.") : undefined;
     if (enabled && password === null) return;
     const res = await fetch("/api/admin/session", {
       method: "POST",
@@ -406,6 +437,11 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
     });
     if (res.ok) setReactions(((await res.json()) as { reactions: BoardPayload["reactions"] }).reactions);
   };
+  const renameMe = useCallback((display: string) => {
+    const next = { ...me, display };
+    setMe(next);
+    setItems((prev) => prev.map((item) => (item.user.id === me.id ? { ...item, user: { ...item.user, nick: next.nick, display: next.display } } : item)));
+  }, [me, setMe]);
 
   return (
     <div
@@ -433,7 +469,7 @@ export function PileBoard({ boardId, initialData }: { boardId: string; initialDa
         }
       }}
     >
-      <Topbar boardId={boardId} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={(name) => setMe({ ...me, display: name })} onCopyUrl={() => {
+      <Topbar boardId={boardId} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onCopyUrl={() => {
         navigator.clipboard?.writeText(`https://pile.so/${boardId}`).catch(() => undefined);
         toast("보드 URL을 복사했어요", I.share);
       }} />
@@ -567,7 +603,7 @@ function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense
   const mine = item.user.id === me.id;
   return (
     <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type}>
-      <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">강사</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
+      <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">관리자</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
       <div className="card-body">{item.type === "text" && <TextBody item={item} reactions={reactions} myId={me.id} onReact={onReact} />}{item.type === "link" && item.link && <LinkBody link={item.link} />}{item.type === "file" && item.file && <FileBody file={item.file} />}</div>
       <Reactions itemId={item.id} reactions={reactions} myId={me.id} onReact={onReact} filterEmojis={POLL_EMOJIS} />
     </article>
