@@ -185,16 +185,32 @@ function useTweaks() {
   return [tweaks, setTweak] as const;
 }
 
-function useMultiplayer({ boardId, myName, feedRef, onReceiveItem }: { boardId: string; myName: string; feedRef: React.RefObject<HTMLDivElement | null>; onReceiveItem: (item: ItemRecord) => void }) {
+function useMultiplayer({
+  boardId,
+  myName,
+  feedRef,
+  onReceiveItem,
+  onReceiveReactions,
+}: {
+  boardId: string;
+  myName: string;
+  feedRef: React.RefObject<HTMLDivElement | null>;
+  onReceiveItem: (item: ItemRecord) => void;
+  onReceiveReactions: (reactions: BoardPayload["reactions"]) => void;
+}) {
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [status, setStatus] = useState<"connecting" | "live">("connecting");
   const [feedScrollTop, setFeedScrollTop] = useState(0);
   const actions = useRef<Record<string, TrysteroAction>>({});
   const onReceiveRef = useRef(onReceiveItem);
+  const onReceiveReactionsRef = useRef(onReceiveReactions);
 
   useEffect(() => {
     onReceiveRef.current = onReceiveItem;
   }, [onReceiveItem]);
+  useEffect(() => {
+    onReceiveReactionsRef.current = onReceiveReactions;
+  }, [onReceiveReactions]);
   useEffect(() => {
     const feed = feedRef.current;
     if (!feed) return;
@@ -229,7 +245,8 @@ function useMultiplayer({ boardId, myName, feedRef, onReceiveItem }: { boardId: 
       const curAct = room.makeAction("cur");
       const namAct = room.makeAction("nam");
       const itmAct = room.makeAction("itm");
-      actions.current = { curAct, namAct, itmAct };
+      const rxnAct = room.makeAction("rxn");
+      actions.current = { curAct, namAct, itmAct, rxnAct };
       room.onPeerJoin = (pid: string) => {
         setPeers((p) => ({ ...p, [pid]: { name: "…", color: peerColor(pid), x: -999, docY: -1 } }));
         setStatus("live");
@@ -245,6 +262,7 @@ function useMultiplayer({ boardId, myName, feedRef, onReceiveItem }: { boardId: 
         if (peerId) setPeers((p) => ({ ...p, [peerId]: { ...(p[peerId] ?? { color: peerColor(peerId), x: -999, docY: -1 }), name } }));
       };
       itmAct.onMessage = (item: ItemRecord) => onReceiveRef.current(item);
+      rxnAct.onMessage = (next: BoardPayload["reactions"]) => onReceiveReactionsRef.current(next);
       setStatus("live");
     }).catch(() => {
       if (!cancelled) setStatus("connecting");
@@ -277,7 +295,36 @@ function useMultiplayer({ boardId, myName, feedRef, onReceiveItem }: { boardId: 
     };
   }, [feedRef]);
   const broadcastItem = useCallback((item: ItemRecord) => actions.current.itmAct?.send(item), []);
-  return { peers, feedScrollTop, status, broadcastItem };
+  const broadcastReactions = useCallback((next: BoardPayload["reactions"]) => actions.current.rxnAct?.send(next), []);
+  return { peers, feedScrollTop, status, broadcastItem, broadcastReactions };
+}
+
+function useBoardSync(boardId: string, onSync: (payload: BoardPayload) => void) {
+  const onSyncRef = useRef(onSync);
+
+  useEffect(() => {
+    onSyncRef.current = onSync;
+  }, [onSync]);
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+
+    const sync = async () => {
+      try {
+        const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, { cache: "no-store" });
+        if (res.ok && !cancelled) onSyncRef.current((await res.json()) as BoardPayload);
+      } catch {
+        // Best-effort backstop for P2P: the next tick will retry.
+      } finally {
+        if (!cancelled) timer = window.setTimeout(sync, document.hidden ? 5000 : 1500);
+      }
+    };
+    timer = window.setTimeout(sync, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [boardId]);
 }
 
 function buildLink(url: string): LinkPayload {
@@ -345,7 +392,22 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     window.setTimeout(() => setNewId(null), 900);
     requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
   }, []);
-  const { peers, feedScrollTop, status, broadcastItem } = useMultiplayer({ boardId, myName: me2.display || me2.nick, feedRef, onReceiveItem: addItem });
+  const applyServerPayload = useCallback((payload: BoardPayload) => {
+    setChannels(payload.channels);
+    setItems(payload.items);
+    setReactions(payload.reactions);
+  }, []);
+  const applyReactions = useCallback((next: BoardPayload["reactions"]) => {
+    setReactions(next);
+  }, []);
+  const { peers, feedScrollTop, status, broadcastItem, broadcastReactions } = useMultiplayer({
+    boardId,
+    myName: me2.display || me2.nick,
+    feedRef,
+    onReceiveItem: addItem,
+    onReceiveReactions: applyReactions,
+  });
+  useBoardSync(boardId, applyServerPayload);
 
   const counts = useMemo(() => {
     const next: Record<string, number> = {};
@@ -478,7 +540,11 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emoji, userId: user.id, boardId }),
     });
-    if (res.ok) setReactions(((await res.json()) as { reactions: BoardPayload["reactions"] }).reactions);
+    if (res.ok) {
+      const next = ((await res.json()) as { reactions: BoardPayload["reactions"] }).reactions;
+      setReactions(next);
+      broadcastReactions(next);
+    }
   };
   const renameMe = useCallback((display: string) => {
     const current = ensureMe();
