@@ -1,16 +1,16 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { cookies } from "next/headers";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
-const DB_PATH = join(process.cwd(), "data", "pile.sqlite");
+const DB_PATH = process.env.PILE_DB_PATH || join(process.cwd(), "data", "pile.sqlite");
 let db: DatabaseSync | null = null;
 
 function getDb() {
   if (!db) {
-    mkdirSync(join(process.cwd(), "data"), { recursive: true });
+    mkdirSync(dirname(DB_PATH), { recursive: true });
     db = new DatabaseSync(DB_PATH);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec(`

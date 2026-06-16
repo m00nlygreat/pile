@@ -22,6 +22,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+ENV PILE_DB_PATH=/app/data/pile.sqlite
 
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
