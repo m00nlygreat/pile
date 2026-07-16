@@ -267,7 +267,7 @@ function useMultiplayer({
   return { peers, feedScrollTop, status, broadcastItem, broadcastReactions };
 }
 
-function useBoardSync(boardId: string, onSync: (payload: BoardPayload) => void) {
+function useBoardSync(boardId: string, onSync: (payload: BoardPayload) => void, hasRealtimePeer: boolean) {
   const onSyncRef = useRef(onSync);
 
   useEffect(() => {
@@ -276,23 +276,35 @@ function useBoardSync(boardId: string, onSync: (payload: BoardPayload) => void) 
   useEffect(() => {
     let cancelled = false;
     let timer = 0;
+    let controller: AbortController | null = null;
 
     const sync = async () => {
+      if (cancelled || document.hidden) return;
+      controller = new AbortController();
       try {
-        const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, { cache: "no-store" });
+        const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, { cache: "no-store", signal: controller.signal });
         if (res.ok && !cancelled) onSyncRef.current((await res.json()) as BoardPayload);
       } catch {
         // Best-effort backstop for P2P: the next tick will retry.
       } finally {
-        if (!cancelled) timer = window.setTimeout(sync, document.hidden ? 5000 : 1500);
+        controller = null;
+        if (!cancelled && !document.hidden) timer = window.setTimeout(sync, hasRealtimePeer ? 60_000 : 15_000);
       }
     };
-    timer = window.setTimeout(sync, 1500);
+    const onVisibilityChange = () => {
+      window.clearTimeout(timer);
+      if (document.hidden) controller?.abort();
+      else sync();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    if (!document.hidden) sync();
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [boardId]);
+  }, [boardId, hasRealtimePeer]);
 }
 
 function buildLink(url: string): LinkPayload {
@@ -381,7 +393,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     onReceiveItem: addItem,
     onReceiveReactions: applyReactions,
   });
-  useBoardSync(boardId, applyServerPayload);
+  useBoardSync(boardId, applyServerPayload, Object.keys(peers).length > 0);
 
   const counts = useMemo(() => {
     const next: Record<string, number> = {};
