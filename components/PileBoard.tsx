@@ -8,24 +8,11 @@ import { I } from "@/components/icons";
 import { renderMarkdown } from "@/components/markdown";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
-const ACCENTS = {
-  clay: "oklch(0.58 0.11 45)",
-  ink: "oklch(0.32 0.02 60)",
-  sage: "oklch(0.55 0.06 150)",
-  blue: "oklch(0.55 0.10 245)",
-};
 const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 const POLL_FENCE_RE = /(```poll\r?\n[\s\S]*?```)/;
 const PRESET_EMOJIS = ["👍", "❤️", "🔥", "😂", "👀", "✅", "💡", "🤔", "🎉", "😮", "🙏", "⭐"];
 const NAMES = ["느긋한 펭귄", "조용한 다람쥐", "성실한 두루미", "호기심 여우", "단단한 고래", "푸근한 사슴"];
 
-type Tweaks = {
-  accentName: keyof typeof ACCENTS;
-  texture: boolean;
-  pileMode: "feed" | "stack";
-  columns: "one" | "two";
-  density: "comfortable" | "compact";
-};
 type Toast = { id: string; msg: string; Icon?: (p: { s?: number }) => ReactElement };
 type Peer = { name: string; color: string; x: number; docY: number };
 type TrysteroAction = { send: (...args: unknown[]) => void; onMessage?: unknown };
@@ -35,8 +22,6 @@ type TrysteroRoom = {
   onPeerLeave?: (peerId: string) => void;
   leave?: () => void;
 };
-
-const tweakDefaults: Tweaks = { accentName: "clay", texture: true, pileMode: "stack", columns: "two", density: "comfortable" };
 
 function uid(prefix = "n") {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -143,12 +128,11 @@ function useLocalUser(boardId: string) {
   useEffect(() => {
     const key = `pile:user:${boardId}`;
     const saved = localStorage.getItem(key);
-    if (saved) {
-      const user = JSON.parse(saved) as UserRecord;
-      const next = { ...user, admin: false };
-      localStorage.setItem(key, JSON.stringify(next));
-      setMe(next);
-    }
+    const user = saved ? (JSON.parse(saved) as UserRecord) : createLocalUser();
+    const next = { ...user, admin: false };
+    localStorage.setItem(key, JSON.stringify(next));
+    setMe(next);
+    saveBoardUser(boardId, next);
   }, [boardId]);
   const update = useCallback((next: UserRecord) => {
     const key = `pile:user:${boardId}`;
@@ -167,22 +151,6 @@ function useLocalUser(boardId: string) {
     return next;
   }, [boardId, me]);
   return [me, update, ensure] as const;
-}
-
-function useTweaks() {
-  const [tweaks, setTweaks] = useState<Tweaks>(tweakDefaults);
-  useEffect(() => {
-    const saved = localStorage.getItem("pile:tweaks");
-    if (saved) setTweaks({ ...tweakDefaults, ...(JSON.parse(saved) as Partial<Tweaks>) });
-  }, []);
-  const setTweak = useCallback(<K extends keyof Tweaks>(key: K, value: Tweaks[K]) => {
-    setTweaks((prev) => {
-      const next = { ...prev, [key]: value };
-      localStorage.setItem("pile:tweaks", JSON.stringify(next));
-      return next;
-    });
-  }, []);
-  return [tweaks, setTweak] as const;
 }
 
 function useMultiplayer({
@@ -353,6 +321,7 @@ function channelPath(boardId: string, slug: string) {
 export function PileBoard({ boardId, initialChannelSlug = "default", initialData }: { boardId: string; initialChannelSlug?: string; initialData: BoardPayload }) {
   const router = useRouter();
   const [channels, setChannels] = useState(initialData.channels);
+  const [participants, setParticipants] = useState(initialData.users);
   const [items, setItems] = useState(initialData.items);
   const [reactions, setReactions] = useState(initialData.reactions);
   const [channel, setChannel] = useState(initialData.channels.find((item) => item.slug === initialChannelSlug)?.id ?? initialData.channels[0]?.id ?? "default");
@@ -360,7 +329,6 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const [dragOver, setDragOver] = useState(false);
   const [newId, setNewId] = useState<string | null>(null);
   const [me, setMe, ensureMe] = useLocalUser(boardId);
-  const [tweaks, setTweak] = useTweaks();
   const [toasts, toast] = useToasts();
   const [showShare, setShowShare] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
@@ -371,6 +339,10 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
   const currentChannel = channels.find((item) => item.id === channel) ?? channels[0];
   const currentChannelSlug = currentChannel?.slug ?? "default";
+  useEffect(() => {
+    if (!me) return;
+    setParticipants((prev) => (prev.some((user) => user.id === me.id) ? prev : [...prev, me]));
+  }, [me]);
   useEffect(() => {
     setShareUrl(`${window.location.origin}${channelPath(boardId, currentChannelSlug)}`);
   }, [boardId, currentChannelSlug]);
@@ -388,12 +360,14 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   }, []);
   const addItem = useCallback((item: ItemRecord) => {
     setItems((prev) => (prev.some((old) => old.id === item.id) ? prev : [item, ...prev]));
+    setParticipants((prev) => (prev.some((user) => user.id === item.user.id) ? prev : [...prev, { ...item.user, admin: false }]));
     setNewId(item.id);
     window.setTimeout(() => setNewId(null), 900);
     requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
   }, []);
   const applyServerPayload = useCallback((payload: BoardPayload) => {
     setChannels(payload.channels);
+    setParticipants(payload.users);
     setItems(payload.items);
     setReactions(payload.reactions);
   }, []);
@@ -420,7 +394,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     const groupItems = channelItems.filter((item) => dateKey(item.t) === key).sort((a, b) => b.t - a.t);
     return { key, ts: groupItems[0]?.t ?? Date.now(), items: groupItems };
   });
-  const dense = tweaks.density === "compact";
+  const dense = false;
 
   const postItem = async (payload: { type: ItemRecord["type"]; body?: string; link?: LinkPayload; file?: FilePayload }) => {
     const author = ensureMe();
@@ -497,18 +471,18 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     setAdmin(enabled);
     toast(enabled ? "관리자 모드 · 모든 아이템 관리 가능" : "관리자 모드를 껐어요", I.shield);
   };
-  const addChannel = async (name: string) => {
+  const addChannel = async (name: string, type: ChannelRecord["type"]) => {
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, type }),
     });
     if (!res.ok) return toast("관리자 권한이 필요해요", I.shield);
     const next = (await res.json()) as ChannelRecord;
     setChannels((prev) => [...prev, next]);
     setChannel(next.id);
     router.push(channelPath(boardId, next.slug));
-    toast(`#${name} 채널을 만들었어요`, I.hash);
+    toast(`${type === "submission" ? "제출" : "일반"} 채널 #${name}을 만들었어요`, type === "submission" ? I.clip : I.hash);
   };
   const pickChannel = useCallback((next: ChannelRecord) => {
     setChannel(next.id);
@@ -550,13 +524,13 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     const current = ensureMe();
     const next = { ...current, display };
     setMe(next);
+    setParticipants((prev) => prev.map((user) => (user.id === current.id ? { ...user, nick: next.nick, display: next.display } : user)));
     setItems((prev) => prev.map((item) => (item.user.id === current.id ? { ...item, user: { ...item.user, nick: next.nick, display: next.display } } : item)));
   }, [ensureMe, setMe]);
 
   return (
     <div
-      className={`app ${tweaks.texture ? "tex" : ""} pile-${tweaks.pileMode} col-${tweaks.columns} ${dense ? "is-dense" : ""}`}
-      style={{ "--accent": ACCENTS[tweaks.accentName] } as React.CSSProperties}
+      className="app tex pile-stack col-two"
       onDragEnter={(e) => {
         e.preventDefault();
         dragDepth.current += 1;
@@ -586,30 +560,35 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         <div className="feed-inner">
           <Composer onSubmit={submitText} />
           <PinnedSection items={pinnedItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} dense={dense} />
-          {groups.length === 0 ? (
-            <EmptyState />
+          {currentChannel?.type === "submission" ? (
+            <SubmissionBoard participants={participants} items={channelItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} dense={dense} />
           ) : (
-            groups.map((group) => (
-              <section className="session" key={group.key}>
-                <div className="session-head">
-                  <span className="session-date-lbl">{dateLabel(group.ts)}</span>
-                  <span className="session-line" />
-                  <span className="session-count">{group.items.length}개</span>
-                </div>
-                <div className="session-items">
-                  {group.items.map((item, idx) => (
-                    <ItemCard key={item.id} item={item} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions[item.id] ?? {}} isPinned={false} onTogglePin={togglePin} dense={dense} isNew={item.id === newId} style={tweaks.pileMode === "stack" ? ({ "--rot": `${(idx % 3 - 1) * 0.7}deg` } as React.CSSProperties) : undefined} />
-                  ))}
-                </div>
-              </section>
-            ))
+            <>
+              {groups.length === 0 ? (
+                <EmptyState />
+              ) : (
+                groups.map((group) => (
+                  <section className="session" key={group.key}>
+                    <div className="session-head">
+                      <span className="session-date-lbl">{dateLabel(group.ts)}</span>
+                      <span className="session-line" />
+                      <span className="session-count">{group.items.length}개</span>
+                    </div>
+                    <div className="session-items">
+                      {group.items.map((item, idx) => (
+                        <ItemCard key={item.id} item={item} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions[item.id] ?? {}} isPinned={false} onTogglePin={togglePin} dense={dense} isNew={item.id === newId} style={{ "--rot": `${(idx % 3 - 1) * 0.7}deg` } as React.CSSProperties} />
+                      ))}
+                    </div>
+                  </section>
+                ))
+              )}
+              <div className="feed-end">— 더미의 끝 —</div>
+            </>
           )}
-          <div className="feed-end">— 더미의 끝 —</div>
         </div>
       </main>
       {dragOver && <DropOverlay />}
       <Toasts toasts={toasts} />
-      <TweaksPanel tweaks={tweaks} setTweak={setTweak} />
       <CursorLayer peers={peers} feedScrollTop={feedScrollTop} />
     </div>
   );
@@ -671,20 +650,35 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
   );
 }
 
-function Channels({ channels, current, counts, admin, onPick, onAdd }: { channels: ChannelRecord[]; current: string; counts: Record<string, number>; admin: boolean; onPick: (channel: ChannelRecord) => void; onAdd: (name: string) => void }) {
+function Channels({ channels, current, counts, admin, onPick, onAdd }: { channels: ChannelRecord[]; current: string; counts: Record<string, number>; admin: boolean; onPick: (channel: ChannelRecord) => void; onAdd: (name: string, type: ChannelRecord["type"]) => void }) {
   const [adding, setAdding] = useState(false);
   const [val, setVal] = useState("");
+  const [type, setType] = useState<ChannelRecord["type"]>("standard");
+  const create = () => {
+    if (!val.trim()) return;
+    onAdd(val.trim(), type);
+    setVal("");
+    setType("standard");
+    setAdding(false);
+  };
   return (
     <nav className="channels">
       <div className="ch-scroll">
         {channels.map((channel) => (
-          <button key={channel.id} className={`chip ${current === channel.id ? "on" : ""}`} onClick={() => onPick(channel)}><I.hash s={13} />{channel.name}{counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}</button>
+          <button key={channel.id} className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""}`} onClick={() => onPick(channel)}>{channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}{channel.name}{counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}</button>
         ))}
         {admin && (adding ? (
-          <span className="ch-add-edit"><input autoFocus value={val} placeholder="채널 이름" onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => {
-            if (e.key === "Enter" && val.trim()) { onAdd(val.trim()); setVal(""); setAdding(false); }
-            if (e.key === "Escape") { setVal(""); setAdding(false); }
-          }} /></span>
+          <span className="ch-add-edit">
+            <input autoFocus value={val} placeholder="채널 이름" onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => {
+              if (e.key === "Enter") create();
+              if (e.key === "Escape") { setVal(""); setType("standard"); setAdding(false); }
+            }} />
+            <span className="ch-type-select" aria-label="채널 유형">
+              <button className={type === "standard" ? "on" : ""} onClick={() => setType("standard")} type="button"><I.hash s={12} />일반</button>
+              <button className={type === "submission" ? "on" : ""} onClick={() => setType("submission")} type="button"><I.clip s={12} />제출</button>
+            </span>
+            <button className="ch-create" onClick={create} disabled={!val.trim()} title="채널 만들기"><I.check s={13} /></button>
+          </span>
         ) : (
           <button className="chip ch-add" onClick={() => setAdding(true)}><I.plus s={13} />채널</button>
         ))}
@@ -707,7 +701,7 @@ function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
   return (
     <div className={`composer ${open ? "open" : ""}`}>
       {!open ? (
-        <button className="composer-rest" onClick={() => setOpen(true)}><span className="ck"><kbd>⌘</kbd><kbd>V</kbd></span><span className="composer-hint">여기에 붙여넣기 — 텍스트 · 링크 · 파일을 던져 두세요</span><span className="composer-cta"><I.clip s={15} />붙여넣기</span></button>
+        <button className="composer-rest" onClick={() => setOpen(true)}><span className="ck"><kbd>Ctrl</kbd><kbd>V</kbd></span><span className="composer-hint">여기에 붙여넣기 — 텍스트 · 링크 · 파일을 던져 두세요</span><span className="composer-cta"><I.clip s={15} />붙여넣기</span></button>
       ) : (
         <div className="composer-edit">
           <textarea ref={ref} value={draft} placeholder="텍스트나 링크를 붙여넣고 Enter… (Markdown 지원)" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {
@@ -723,6 +717,78 @@ function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
 
 function Avatar({ user, s = 26 }: { user: UserRecord; s?: number }) {
   return <span className="avatar" style={{ width: s, height: s, background: avatarTone(user.nick), fontSize: s * 0.42 }}>{user.admin ? <I.shield s={s * 0.5} /> : initials(user.display || user.nick)}</span>;
+}
+
+function SubmissionBoard({ participants, items, me, admin, onDelete, onCopy, onReact, reactions, onTogglePin, dense }: { participants: UserRecord[]; items: ItemRecord[]; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; dense: boolean }) {
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const roster = useMemo(() => {
+    const users = new Map(participants.map((user) => [user.id, user]));
+    items.forEach((item) => users.set(item.user.id, { ...item.user, admin: false }));
+    return [...users.values()].sort((a, b) => (a.display || a.nick).localeCompare(b.display || b.nick, "ko"));
+  }, [items, participants]);
+  const itemsByUser = useMemo(() => {
+    const grouped = new Map<string, ItemRecord[]>();
+    items.forEach((item) => grouped.set(item.user.id, [...(grouped.get(item.user.id) ?? []), item]));
+    grouped.forEach((userItems) => userItems.sort((a, b) => a.t - b.t));
+    return grouped;
+  }, [items]);
+  const selectedUser = roster.find((user) => user.id === selectedUserId);
+  const selectedItems = selectedUserId ? itemsByUser.get(selectedUserId) ?? [] : [];
+
+  return (
+    <section className="submission-board">
+      {roster.length ? (
+        <div className="submission-list">
+          {roster.map((user) => {
+            const userItems = itemsByUser.get(user.id) ?? [];
+            const submitted = userItems.length > 0;
+            const person = <><Avatar user={user} s={42} /><span className="submission-name">{user.display || user.nick}{user.id === me.id && <small>나</small>}</span><span className="submission-count">{userItems.length}</span></>;
+            return submitted ? (
+              <button className="submission-person submitted" key={user.id} onClick={() => setSelectedUserId(user.id)} aria-label={`${user.display || user.nick}의 제출물 보기 · ${userItems.length}개`}>{person}</button>
+            ) : (
+              <div className="submission-person pending" key={user.id}>{person}</div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="submission-empty">아직 보드에 참가한 사용자가 없습니다.</div>
+      )}
+      <div className="submission-tip"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd> 텍스트, 링크, 이미지를 바로 제출할 수 있어요.</div>
+      {selectedUser && selectedItems.length > 0 && <SubmissionModal user={selectedUser} items={selectedItems} me={me} admin={admin} onClose={() => setSelectedUserId(null)} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions} onTogglePin={onTogglePin} dense={dense} />}
+    </section>
+  );
+}
+
+function SubmissionModal({ user, items, me, admin, onClose, onDelete, onCopy, onReact, reactions, onTogglePin, dense }: { user: UserRecord; items: ItemRecord[]; me: UserRecord; admin: boolean; onClose: () => void; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; dense: boolean }) {
+  const [index, setIndex] = useState(0);
+  const safeIndex = Math.min(index, items.length - 1);
+  const go = useCallback((direction: number) => setIndex((current) => (current + direction + items.length) % items.length), [items.length]);
+  useEffect(() => {
+    setIndex(0);
+  }, [user.id]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowLeft" && items.length > 1) { event.preventDefault(); go(-1); }
+      if (event.key === "ArrowRight" && items.length > 1) { event.preventDefault(); go(1); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [go, items.length, onClose]);
+  const item = items[safeIndex];
+  if (!item) return null;
+  return (
+    <div className="modal-backdrop submission-backdrop" onClick={onClose}>
+      <div className="submission-overlay" role="dialog" aria-modal="true" aria-label={`${user.display || user.nick}의 제출물`} onClick={(event) => event.stopPropagation()}>
+        <header className="submission-overlay-head"><span className="submission-overlay-user"><Avatar user={user} s={32} /><span><strong>{user.display || user.nick}</strong><small>제출물</small></span></span><span className="submission-overlay-count">{safeIndex + 1} / {items.length}</span><button className="submission-overlay-close" onClick={onClose} aria-label="닫기">×</button></header>
+        <div className="submission-stage">
+          {items.length > 1 && <button className="submission-nav prev" onClick={() => go(-1)} aria-label="이전 제출물">‹</button>}
+          <div className="submission-item"><ItemCard item={item} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[item.id] ?? {}} dense={dense} isPinned={item.pinned} onTogglePin={onTogglePin} /></div>
+          {items.length > 1 && <button className="submission-nav next" onClick={() => go(1)} aria-label="다음 제출물">›</button>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Placeholder({ label, h = 150 }: { label: string; h?: number }) {
@@ -809,15 +875,6 @@ function DropOverlay() {
 
 function Toasts({ toasts }: { toasts: Toast[] }) {
   return <div className="toasts">{toasts.map(({ id, msg, Icon }) => <div className="toast" key={id}>{Icon && <Icon s={15} />}<span>{msg}</span></div>)}</div>;
-}
-
-function TweaksPanel({ tweaks, setTweak }: { tweaks: Tweaks; setTweak: <K extends keyof Tweaks>(key: K, value: Tweaks[K]) => void }) {
-  const [open, setOpen] = useState(false);
-  return <div className={`twk ${open ? "open" : ""}`}><button className="twk-fab" onClick={() => setOpen((v) => !v)} title="Tweaks">Tweaks</button>{open && <div className="twk-panel"><div className="twk-hd"><b>Tweaks</b><button onClick={() => setOpen(false)} aria-label="Close tweaks">×</button></div><div className="twk-body"><div className="twk-sect">모양 · Appearance</div><div className="twk-row"><span>강조색</span><div className="twk-colors">{(Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]).map((name) => <button key={name} className={tweaks.accentName === name ? "on" : ""} style={{ background: ACCENTS[name] }} onClick={() => setTweak("accentName", name)} title={name} />)}</div></div><Radio label="질감" value={tweaks.texture ? "on" : "off"} options={["on", "off"]} onChange={(v) => setTweak("texture", v === "on")} /><div className="twk-sect">더미 · Pile</div><Radio label="쌓는 방식" value={tweaks.pileMode} options={["feed", "stack"]} onChange={(v) => setTweak("pileMode", v as Tweaks["pileMode"])} /><Radio label="열" value={tweaks.columns} options={["one", "two"]} onChange={(v) => setTweak("columns", v as Tweaks["columns"])} /><Radio label="밀도" value={tweaks.density} options={["comfortable", "compact"]} onChange={(v) => setTweak("density", v as Tweaks["density"])} /></div></div>}</div>;
-}
-
-function Radio({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
-  return <div className="twk-row"><span>{label}</span><div className="twk-seg" role="radiogroup">{options.map((option) => <button key={option} role="radio" aria-checked={option === value} className={option === value ? "on" : ""} onClick={() => onChange(option)}>{option}</button>)}</div></div>;
 }
 
 function PeerPips({ peers }: { peers: Record<string, Peer> }) {

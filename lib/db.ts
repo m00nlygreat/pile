@@ -31,6 +31,7 @@ function getDb() {
         board_id TEXT NOT NULL,
         slug TEXT NOT NULL DEFAULT '',
         name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'standard',
         position INTEGER NOT NULL,
         PRIMARY KEY (board_id, id)
       );
@@ -64,6 +65,7 @@ function getDb() {
       );
     `);
     migrateChannelSlugs(db);
+    migrateChannelTypes(db);
     migrateUserProfiles(db);
   }
   return db;
@@ -100,6 +102,13 @@ function migrateChannelSlugs(conn: DatabaseSync) {
     used.add(slug.toLowerCase());
     if (slug !== current) update.run(slug, row.boardId, row.id);
   });
+}
+
+function migrateChannelTypes(conn: DatabaseSync) {
+  const columns = conn.prepare("PRAGMA table_info(channels)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "type")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN type TEXT NOT NULL DEFAULT 'standard'");
+  }
 }
 
 function migrateUserProfiles(conn: DatabaseSync) {
@@ -157,8 +166,8 @@ export function ensureBoard(boardId: string) {
   const exists = conn.prepare("SELECT id FROM boards WHERE id = ?").get(boardId);
   if (exists) return;
   conn.prepare("INSERT INTO boards (id, display_name, created_at) VALUES (?, ?, ?)").run(boardId, boardId, Date.now());
-  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, position) VALUES (?, ?, ?, ?, ?)");
-  seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.slug, channel.name, channel.position));
+  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, position) VALUES (?, ?, ?, ?, ?, ?)");
+  seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.slug, channel.name, channel.type, channel.position));
 }
 
 function boardExists(boardId: string) {
@@ -171,17 +180,18 @@ export function getBoardPayload(boardId: string): BoardPayload {
     | { id: string; displayName: string }
     | undefined;
   if (!boardRow) {
-    return { board: { id: boardId, displayName: boardId }, channels: seedChannels(boardId), items: [], reactions: {} };
+    return { board: { id: boardId, displayName: boardId }, channels: seedChannels(boardId), users: [], items: [], reactions: {} };
   }
   const board = boardRow ? { id: String(boardRow.id), displayName: String(boardRow.displayName) } : undefined;
   const channelRows = conn
-    .prepare("SELECT id, board_id as boardId, slug, name, position FROM channels WHERE board_id = ? ORDER BY position ASC")
+    .prepare("SELECT id, board_id as boardId, slug, name, type, position FROM channels WHERE board_id = ? ORDER BY position ASC")
     .all(boardId) as ChannelRecord[];
   const channels: ChannelRecord[] = channelRows.map((row) => ({
     id: String(row.id),
     boardId: String(row.boardId),
     slug: String(row.slug),
     name: String(row.name),
+    type: row.type === "submission" ? "submission" : "standard",
     position: Number(row.position),
   }));
   const itemRows = conn
@@ -191,6 +201,12 @@ export function getBoardPayload(boardId: string): BoardPayload {
     .prepare("SELECT user_id as userId, nick, display FROM board_users WHERE board_id = ?")
     .all(boardId) as { userId: string; nick: string; display: string }[];
   const users = new Map(userRows.map((user) => [String(user.userId), user]));
+  const boardUsers: UserRecord[] = userRows.map((user) => ({
+    id: String(user.userId),
+    nick: String(user.nick),
+    display: String(user.display),
+    admin: false,
+  }));
   const items: ItemRecord[] = itemRows.map((row) => {
     const fallbackUser = json<UserRecord>(row.user_json);
     const userId = String(row.user_id || fallbackUser.id);
@@ -220,21 +236,22 @@ export function getBoardPayload(boardId: string): BoardPayload {
     reactions[row.itemId][row.emoji] ??= [];
     reactions[row.itemId][row.emoji].push(row.userId);
   });
-  return { board: board ?? { id: boardId, displayName: boardId }, channels, items, reactions };
+  return { board: board ?? { id: boardId, displayName: boardId }, channels, users: boardUsers, items, reactions };
 }
 
-export function createChannel(boardId: string, name: string) {
+export function createChannel(boardId: string, name: string, type: ChannelRecord["type"] = "standard") {
   ensureBoard(boardId);
   const conn = getDb();
   const maxRow = conn.prepare("SELECT COALESCE(MAX(position), -1) as maxPos FROM channels WHERE board_id = ?").get(boardId) as { maxPos: number };
   const existing = conn.prepare("SELECT slug FROM channels WHERE board_id = ?").all(boardId) as { slug: string }[];
   const slug = uniqueSlug(slugFromChannelName(name), existing.map((channel) => channel.slug));
-  const channel = { id: uid("ch"), boardId, slug, name, position: maxRow.maxPos + 1 };
-  conn.prepare("INSERT INTO channels (id, board_id, slug, name, position) VALUES (?, ?, ?, ?, ?)").run(
+  const channel = { id: uid("ch"), boardId, slug, name, type, position: maxRow.maxPos + 1 };
+  conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, position) VALUES (?, ?, ?, ?, ?, ?)").run(
     channel.id,
     channel.boardId,
     channel.slug,
     channel.name,
+    channel.type,
     channel.position,
   );
   return channel;
@@ -248,9 +265,9 @@ export function channelSlugExists(boardId: string, channelSlug: string) {
 }
 
 export function upsertBoardUser(boardId: string, user: UserRecord) {
+  ensureBoard(boardId);
   const nick = user.nick || user.display || "익명";
   const display = user.display || nick;
-  if (!boardExists(boardId)) return { ...user, nick, display, admin: false };
   getDb()
     .prepare(`
       INSERT INTO board_users (board_id, user_id, nick, display, updated_at)
