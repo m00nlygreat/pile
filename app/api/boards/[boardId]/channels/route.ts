@@ -9,8 +9,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
   const { boardId } = await params;
-  const body = (await request.json()) as { name?: string };
+  const body = (await request.json()) as { name?: string; type?: "standard" | "submission" };
   const name = body.name?.trim();
   if (!name) return NextResponse.json({ error: "채널 이름이 필요합니다." }, { status: 400 });
-  return NextResponse.json(createChannel(decodeURIComponent(boardId), name));
+  const type = body.type === "submission" ? "submission" : "standard";
+  return NextResponse.json(createChannel(decodeURIComponent(boardId), name, type));
 }

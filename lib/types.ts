@@ -13,6 +13,7 @@ export type ChannelRecord = {
   slug: string;
   name: string;
   position: number;
+  type: "standard" | "submission";
 };
 
 export type LinkPayload = {
@@ -49,6 +50,7 @@ export type ItemRecord = {
 export type BoardPayload = {
   board: { id: string; displayName: string };
   channels: ChannelRecord[];
+  users: UserRecord[];
   items: ItemRecord[];
   reactions: Record<string, Record<string, string[]>>;
 };
