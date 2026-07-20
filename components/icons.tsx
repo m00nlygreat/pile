@@ -44,6 +44,7 @@ export const I = {
   ),
   text: (p: IconProps) => <Icon {...p} d="M5 6h14M5 12h14M5 18h9" />,
   trash: (p: IconProps) => <Icon {...p} d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />,
+  edit: (p: IconProps) => <Icon {...p} d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4zM13.5 6.5l4 4" />,
   plus: (p: IconProps) => <Icon {...p} d="M12 5v14M5 12h14" />,
   check: (p: IconProps) => <Icon {...p} d="M5 12l5 5L20 6" />,
   clip: (p: IconProps) => (

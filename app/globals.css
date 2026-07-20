@@ -162,6 +162,20 @@ kbd {
 .ch-type-select button.on { color: var(--accent-ink); background: var(--surface); box-shadow: 0 1px 3px oklch(0.5 0.02 70 / .14); }
 .ch-create { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 8px; color: white; background: var(--accent); }
 .ch-create:disabled { cursor: default; opacity: .35; }
+.channel-menu {
+  position: fixed;
+  z-index: 240;
+  width: 176px;
+  padding: 5px;
+  border: 1px solid var(--hair-2);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 14px 38px -12px oklch(0.3 0.04 60 / .38);
+}
+.channel-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; border-radius: 8px; color: var(--ink); font-size: 13px; text-align: left; }
+.channel-menu button:hover, .channel-menu button:focus-visible { background: var(--surface-2); outline: none; }
+.channel-menu button.danger { color: oklch(0.52 0.2 28); }
+.channel-menu button.danger:hover, .channel-menu button.danger:focus-visible { background: oklch(0.96 0.025 28); }
 
 .feed { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
 .feed-inner { max-width: 688px; margin: 0 auto; padding: 0 24px 80px; }
@@ -241,6 +255,22 @@ kbd {
   max-width: 100%;
 }
 .modal-actions { display: flex; gap: 8px; }
+.channel-edit-modal { align-items: stretch; gap: 18px; width: min(94vw, 480px); padding: 28px; border-radius: 20px; }
+.channel-edit-head { display: flex; align-items: flex-start; gap: 12px; }
+.channel-edit-icon { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px; color: var(--accent-ink); background: var(--accent-soft); }
+.channel-edit-head h2 { margin: 0; color: var(--ink); font-size: 18px; line-height: 1.35; }
+.channel-edit-head p { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; }
+.channel-edit-field { display: flex; flex-direction: column; gap: 7px; }
+.channel-edit-field > span { color: var(--ink); font-size: 12px; font-weight: 650; }
+.channel-edit-field input { width: 100%; padding: 10px 11px; border: 1px solid var(--hair-2); border-radius: 9px; outline: none; color: var(--ink); background: var(--surface); font: inherit; font-size: 14px; }
+.channel-edit-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.channel-edit-field small { color: var(--faint); font-size: 11px; line-height: 1.45; }
+.channel-slug-input { display: flex; align-items: center; border: 1px solid var(--hair-2); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.channel-slug-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.channel-slug-input > span { padding-left: 11px; color: var(--faint); font-family: var(--mono); }
+.channel-slug-input input { border: 0; border-radius: 0; box-shadow: none !important; font-family: var(--mono); }
+.channel-edit-error { margin: -4px 0 0; padding: 9px 11px; border-radius: 9px; color: oklch(0.48 0.2 28); background: oklch(0.96 0.025 28); font-size: 12px; }
+.channel-edit-actions { justify-content: flex-end; margin-top: 2px; }
 
 .submission-board { margin-top: 8px; padding: 16px; border: 1px solid var(--hair); border-radius: 20px; background: color-mix(in oklch, var(--surface) 94%, transparent); box-shadow: var(--shadow-card); }
 .submission-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 9px; }

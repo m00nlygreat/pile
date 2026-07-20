@@ -32,3 +32,7 @@ export function uniqueSlug(baseSlug: string, usedSlugs: Iterable<string>) {
   }
   return slug;
 }
+
+export function isValidChannelSlug(slug: string) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+}

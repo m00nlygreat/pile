@@ -257,11 +257,78 @@ export function createChannel(boardId: string, name: string, type: ChannelRecord
   return channel;
 }
 
+export function updateChannel(boardId: string, channelId: string, name: string, slug: string) {
+  ensureBoard(boardId);
+  const conn = getDb();
+  const current = conn
+    .prepare("SELECT id, board_id as boardId, slug, name, type, position FROM channels WHERE board_id = ? AND id = ?")
+    .get(boardId, channelId) as ChannelRecord | undefined;
+  if (!current) return { ok: false as const, reason: "not-found" as const };
+
+  const duplicate = conn
+    .prepare("SELECT 1 FROM channels WHERE board_id = ? AND lower(slug) = lower(?) AND id <> ?")
+    .get(boardId, slug, channelId);
+  if (duplicate) return { ok: false as const, reason: "duplicate-slug" as const };
+
+  conn.prepare("UPDATE channels SET name = ?, slug = ? WHERE board_id = ? AND id = ?").run(name, slug, boardId, channelId);
+  return {
+    ok: true as const,
+    channel: {
+      id: String(current.id),
+      boardId: String(current.boardId),
+      slug,
+      name,
+      type: current.type === "submission" ? "submission" as const : "standard" as const,
+      position: Number(current.position),
+    },
+  };
+}
+
+export function deleteChannel(boardId: string, channelId: string) {
+  ensureBoard(boardId);
+  const conn = getDb();
+  const current = conn.prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ?").get(boardId, channelId);
+  if (!current) return { ok: false as const, reason: "not-found" as const };
+
+  const itemCount = conn.prepare("SELECT COUNT(*) as count FROM items WHERE board_id = ? AND channel = ?").get(boardId, channelId) as { count: number };
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    conn
+      .prepare("DELETE FROM reactions WHERE item_id IN (SELECT id FROM items WHERE board_id = ? AND channel = ?)")
+      .run(boardId, channelId);
+    conn.prepare("DELETE FROM items WHERE board_id = ? AND channel = ?").run(boardId, channelId);
+    conn.prepare("DELETE FROM channels WHERE board_id = ? AND id = ?").run(boardId, channelId);
+    conn.exec("COMMIT");
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
+  return { ok: true as const, deletedItems: Number(itemCount.count) };
+}
+
 export function channelSlugExists(boardId: string, channelSlug: string) {
   if (!boardExists(boardId)) {
     return seedChannels(boardId).some((channel) => channel.slug === channelSlug);
   }
   return Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND slug = ?").get(boardId, channelSlug));
+}
+
+export function getChannelBySlug(boardId: string, channelSlug: string) {
+  if (!boardExists(boardId)) {
+    return seedChannels(boardId).find((channel) => channel.slug === channelSlug);
+  }
+  const row = getDb()
+    .prepare("SELECT id, board_id as boardId, slug, name, type, position FROM channels WHERE board_id = ? AND slug = ?")
+    .get(boardId, channelSlug) as ChannelRecord | undefined;
+  if (!row) return undefined;
+  return {
+    id: String(row.id),
+    boardId: String(row.boardId),
+    slug: String(row.slug),
+    name: String(row.name),
+    type: row.type === "submission" ? "submission" as const : "standard" as const,
+    position: Number(row.position),
+  };
 }
 
 export function upsertBoardUser(boardId: string, user: UserRecord) {
@@ -342,8 +409,8 @@ export function toggleReaction(itemId: string, emoji: string, userId: string) {
 }
 
 export function defaultChannelExists(boardId: string, channelId: string) {
-  return (
-    DEFAULT_CHANNELS.some((channel) => channel.id === channelId) ||
-    Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ?").get(boardId, channelId))
-  );
+  if (!boardExists(boardId)) {
+    return DEFAULT_CHANNELS.some((channel) => channel.id === channelId);
+  }
+  return Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ?").get(boardId, channelId));
 }

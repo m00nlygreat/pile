@@ -326,8 +326,9 @@ async function fileToPayload(file: File): Promise<FilePayload> {
   return { name: file.name, mime: file.type || "application/octet-stream", size: file.size, preview: file.type.startsWith("image/") ? "drop" : null, dataUrl };
 }
 
-function channelPath(boardId: string, slug: string) {
-  return `/${encodeURIComponent(boardId)}/${encodeURIComponent(slug)}`;
+function channelPath(boardId: string, channel: Pick<ChannelRecord, "id" | "slug">) {
+  const boardPath = `/${encodeURIComponent(boardId)}`;
+  return channel.id === "default" ? boardPath : `${boardPath}/${encodeURIComponent(channel.slug)}`;
 }
 
 export function PileBoard({ boardId, initialChannelSlug = "default", initialData }: { boardId: string; initialChannelSlug?: string; initialData: BoardPayload }) {
@@ -350,14 +351,25 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const displayMe = me ?? { id: "", nick: "익명", display: "익명", admin: false };
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
   const currentChannel = channels.find((item) => item.id === channel) ?? channels[0];
-  const currentChannelSlug = currentChannel?.slug ?? "default";
   useEffect(() => {
     if (!me) return;
     setParticipants((prev) => (prev.some((user) => user.id === me.id) ? prev : [...prev, me]));
   }, [me]);
   useEffect(() => {
-    setShareUrl(`${window.location.origin}${channelPath(boardId, currentChannelSlug)}`);
-  }, [boardId, currentChannelSlug]);
+    const path = currentChannel ? channelPath(boardId, currentChannel) : `/${encodeURIComponent(boardId)}`;
+    setShareUrl(`${window.location.origin}${path}`);
+  }, [boardId, currentChannel]);
+  useEffect(() => {
+    if (!channels.length) {
+      if (channel) setChannel("");
+      router.replace(`/${encodeURIComponent(boardId)}`);
+      return;
+    }
+    if (channels.some((item) => item.id === channel)) return;
+    const fallback = channels[0];
+    setChannel(fallback.id);
+    router.replace(channelPath(boardId, fallback));
+  }, [boardId, channel, channels, router]);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/admin/session")
@@ -493,13 +505,53 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     const next = (await res.json()) as ChannelRecord;
     setChannels((prev) => [...prev, next]);
     setChannel(next.id);
-    router.push(channelPath(boardId, next.slug));
+    router.push(channelPath(boardId, next));
     toast(`${type === "submission" ? "제출" : "일반"} 채널 #${name}을 만들었어요`, type === "submission" ? I.clip : I.hash);
   };
   const pickChannel = useCallback((next: ChannelRecord) => {
     setChannel(next.id);
-    router.push(channelPath(boardId, next.slug));
+    router.push(channelPath(boardId, next));
   }, [boardId, router]);
+  const editChannel = async (target: ChannelRecord, name: string, slug: string) => {
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, slug }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      return payload?.error ?? "채널을 수정할 수 없습니다.";
+    }
+    const updated = (await res.json()) as ChannelRecord;
+    setChannels((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    if (channel === updated.id) router.replace(channelPath(boardId, updated));
+    toast(`#${updated.name} 채널을 수정했어요`, I.edit);
+    return null;
+  };
+  const deleteChannel = async (target: ChannelRecord) => {
+    const itemCount = counts[target.id] ?? 0;
+    const detail = itemCount ? `\n채널 안의 게시물 ${itemCount}개도 모두 삭제됩니다.` : "";
+    if (!window.confirm(`#${target.name} 채널을 삭제할까요?${detail}\n이 작업은 되돌릴 수 없습니다.`)) return;
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      toast(payload?.error ?? "채널을 삭제할 수 없어요", I.trash);
+      return;
+    }
+    const payload = (await res.json()) as { deletedItems?: number };
+    const removedItemIds = new Set(items.filter((item) => item.channel === target.id).map((item) => item.id));
+    const remaining = channels.filter((item) => item.id !== target.id);
+    setChannels(remaining);
+    setItems((prev) => prev.filter((item) => item.channel !== target.id));
+    setReactions((prev) => Object.fromEntries(Object.entries(prev).filter(([itemId]) => !removedItemIds.has(itemId))));
+    if (channel === target.id) {
+      const fallback = remaining[0];
+      setChannel(fallback?.id ?? "");
+      router.replace(fallback ? channelPath(boardId, fallback) : `/${encodeURIComponent(boardId)}`);
+    }
+    const deletedItems = payload.deletedItems ?? itemCount;
+    toast(deletedItems ? `#${target.name} 채널과 게시물 ${deletedItems}개를 삭제했어요` : `#${target.name} 채널을 삭제했어요`, I.trash);
+  };
   const togglePin = async (item: ItemRecord) => {
     const pinned = !item.pinned;
     const res = await fetch(`/api/items/${encodeURIComponent(item.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned }) });
@@ -567,7 +619,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     >
       <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} />
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
-      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} />
+      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
           <Composer onSubmit={submitText} />
@@ -662,10 +714,28 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
   );
 }
 
-function Channels({ channels, current, counts, admin, onPick, onAdd }: { channels: ChannelRecord[]; current: string; counts: Record<string, number>; admin: boolean; onPick: (channel: ChannelRecord) => void; onAdd: (name: string, type: ChannelRecord["type"]) => void }) {
+type ChannelMenuState = { channel: ChannelRecord; x: number; y: number };
+
+function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onDelete }: {
+  channels: ChannelRecord[];
+  current: string;
+  counts: Record<string, number>;
+  admin: boolean;
+  onPick: (channel: ChannelRecord) => void;
+  onAdd: (name: string, type: ChannelRecord["type"]) => void;
+  onEdit: (channel: ChannelRecord, name: string, slug: string) => Promise<string | null>;
+  onDelete: (channel: ChannelRecord) => void;
+}) {
   const [adding, setAdding] = useState(false);
   const [val, setVal] = useState("");
   const [type, setType] = useState<ChannelRecord["type"]>("standard");
+  const [menu, setMenu] = useState<ChannelMenuState | null>(null);
+  const [editing, setEditing] = useState<ChannelRecord | null>(null);
+  const longPressTimer = useRef(0);
+  const suppressClickTimer = useRef(0);
+  const longPressStart = useRef({ x: 0, y: 0 });
+  const suppressClick = useRef(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const create = () => {
     if (!val.trim()) return;
     onAdd(val.trim(), type);
@@ -673,11 +743,91 @@ function Channels({ channels, current, counts, admin, onPick, onAdd }: { channel
     setType("standard");
     setAdding(false);
   };
+  const openMenu = (channel: ChannelRecord, x: number, y: number) => {
+    if (!admin) return;
+    setMenu({
+      channel,
+      x: Math.max(8, Math.min(x, window.innerWidth - 184)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 104)),
+    });
+  };
+  const cancelLongPress = () => {
+    window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = 0;
+  };
+  useEffect(() => {
+    if (!menu) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const close = (event: PointerEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest(".channel-menu")) setMenu(null);
+    };
+    const closeOnScroll = () => setMenu(null);
+    const closeOnKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(null); };
+    document.addEventListener("pointerdown", close);
+    window.addEventListener("resize", closeOnScroll);
+    window.addEventListener("scroll", closeOnScroll, true);
+    document.addEventListener("keydown", closeOnKey);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      window.removeEventListener("resize", closeOnScroll);
+      window.removeEventListener("scroll", closeOnScroll, true);
+      document.removeEventListener("keydown", closeOnKey);
+    };
+  }, [menu]);
+  useEffect(() => () => {
+    window.clearTimeout(longPressTimer.current);
+    window.clearTimeout(suppressClickTimer.current);
+  }, []);
   return (
     <nav className="channels">
       <div className="ch-scroll">
         {channels.map((channel) => (
-          <button key={channel.id} className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""}`} onClick={() => onPick(channel)}>{channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}{channel.name}{counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}</button>
+          <button
+            key={channel.id}
+            className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""}`}
+            onClick={() => {
+              if (suppressClick.current) {
+                suppressClick.current = false;
+                window.clearTimeout(suppressClickTimer.current);
+                return;
+              }
+              onPick(channel);
+            }}
+            onContextMenu={(event) => {
+              if (!admin) return;
+              event.preventDefault();
+              openMenu(channel, event.clientX, event.clientY);
+            }}
+            onKeyDown={(event) => {
+              if (admin && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                openMenu(channel, rect.left, rect.bottom + 4);
+              }
+            }}
+            onPointerDown={(event) => {
+              if (!admin || event.pointerType === "mouse") return;
+              cancelLongPress();
+              longPressStart.current = { x: event.clientX, y: event.clientY };
+              longPressTimer.current = window.setTimeout(() => {
+                suppressClick.current = true;
+                window.clearTimeout(suppressClickTimer.current);
+                suppressClickTimer.current = window.setTimeout(() => { suppressClick.current = false; }, 1000);
+                openMenu(channel, event.clientX, event.clientY);
+              }, 550);
+            }}
+            onPointerMove={(event) => {
+              if (Math.hypot(event.clientX - longPressStart.current.x, event.clientY - longPressStart.current.y) > 8) cancelLongPress();
+            }}
+            onPointerUp={cancelLongPress}
+            onPointerCancel={cancelLongPress}
+            aria-haspopup={admin ? "menu" : undefined}
+            title={admin ? "우클릭하거나 길게 눌러 채널 관리" : undefined}
+          >
+            {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+            {channel.name}
+            {counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}
+          </button>
         ))}
         {admin && (adding ? (
           <span className="ch-add-edit">
@@ -695,7 +845,72 @@ function Channels({ channels, current, counts, admin, onPick, onAdd }: { channel
           <button className="chip ch-add" onClick={() => setAdding(true)}><I.plus s={13} />채널</button>
         ))}
       </div>
+      {menu && (
+        <div ref={menuRef} className="channel-menu" role="menu" aria-label={`${menu.channel.name} 채널 관리`} style={{ left: menu.x, top: menu.y }}>
+          <button role="menuitem" onClick={() => { setEditing(menu.channel); setMenu(null); }}><I.edit s={14} />채널 수정</button>
+          <button className="danger" role="menuitem" onClick={() => { const target = menu.channel; setMenu(null); onDelete(target); }}><I.trash s={14} />채널 삭제</button>
+        </div>
+      )}
+      {editing && <ChannelEditModal channel={editing} onClose={() => setEditing(null)} onSubmit={onEdit} />}
     </nav>
+  );
+}
+
+function ChannelEditModal({ channel, onClose, onSubmit }: {
+  channel: ChannelRecord;
+  onClose: () => void;
+  onSubmit: (channel: ChannelRecord, name: string, slug: string) => Promise<string | null>;
+}) {
+  const [name, setName] = useState(channel.name);
+  const [slug, setSlug] = useState(channel.slug);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const nameId = useId();
+  const slugId = useId();
+  const save = async () => {
+    if (!name.trim() || !slug.trim() || saving) return;
+    setSaving(true);
+    setError("");
+    const nextError = await onSubmit(channel, name.trim(), slug.trim());
+    setSaving(false);
+    if (nextError) setError(nextError);
+    else onClose();
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !saving) onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
+  return (
+    <div className="modal-backdrop" onMouseDown={() => { if (!saving) onClose(); }}>
+      <form
+        className="modal-box channel-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${nameId}-title`}
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => { event.preventDefault(); save(); }}
+      >
+        <div className="channel-edit-head">
+          <span className="channel-edit-icon"><I.edit s={18} /></span>
+          <div><h2 id={`${nameId}-title`}>채널 수정</h2><p>채널 이름과 주소용 slug를 변경합니다.</p></div>
+        </div>
+        <label className="channel-edit-field" htmlFor={nameId}>
+          <span>채널명</span>
+          <input id={nameId} autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={80} />
+        </label>
+        <label className="channel-edit-field" htmlFor={slugId}>
+          <span>채널 slug</span>
+          <div className="channel-slug-input"><span>/</span><input id={slugId} value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase())} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={80} /></div>
+          <small>영문 소문자, 숫자, 하이픈만 사용할 수 있습니다.{channel.id === "default" ? " 기본 채널의 대표 주소는 보드 루트로 유지됩니다." : ""}</small>
+        </label>
+        {error && <p className="channel-edit-error" role="alert">{error}</p>}
+        <div className="modal-actions channel-edit-actions">
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>취소</button>
+          <button type="submit" className="btn-pri" disabled={!name.trim() || !slug.trim() || saving}>{saving ? "저장 중…" : "변경 저장"}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { PileBoard } from "@/components/PileBoard";
-import { channelSlugExists, getBoardPayload } from "@/lib/db";
+import { getBoardPayload, getChannelBySlug } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +9,13 @@ export default async function ChannelPage({ params }: { params: Promise<{ boardI
   const decodedBoardId = decodeURIComponent(boardId);
   const decodedChannelId = decodeURIComponent(channelId);
 
-  if (!channelSlugExists(decodedBoardId, decodedChannelId)) {
+  const channel = getChannelBySlug(decodedBoardId, decodedChannelId);
+  if (!channel) {
     notFound();
+  }
+
+  if (channel.id === "default") {
+    redirect(`/${encodeURIComponent(decodedBoardId)}`);
   }
 
   return <PileBoard boardId={decodedBoardId} initialChannelSlug={decodedChannelId} initialData={getBoardPayload(decodedBoardId)} />;
