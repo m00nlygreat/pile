@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
+import { closestCenter, DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
+import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { I } from "@/components/icons";
 import { renderMarkdown } from "@/components/markdown";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
@@ -761,16 +766,6 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
 }
 
 type ChannelMenuState = { channel: ChannelRecord; x: number; y: number };
-type ChannelDragState = {
-  id: string;
-  pointerId: number;
-  x: number;
-  y: number;
-  offsetX: number;
-  offsetY: number;
-  width: number;
-  height: number;
-};
 
 function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onArchive, onReorder, onDelete }: {
   channels: ChannelRecord[];
@@ -790,152 +785,39 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   const [menu, setMenu] = useState<ChannelMenuState | null>(null);
   const [editing, setEditing] = useState<ChannelRecord | null>(null);
   const [openedArchivedId, setOpenedArchivedId] = useState<string | null>(null);
-  const [dragState, setDragState] = useState<ChannelDragState | null>(null);
-  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const longPressTimer = useRef(0);
   const suppressClickTimer = useRef(0);
   const longPressStart = useRef({ x: 0, y: 0 });
   const suppressClick = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const archiveDetailsRef = useRef<HTMLDetailsElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
-  const previousRects = useRef(new Map<string, DOMRect>());
-  const activeDrag = useRef<ChannelDragState | null>(null);
-  const dragOrderRef = useRef<string[] | null>(null);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 280, tolerance: 6 } }),
+  );
   const archivedChannels = channels
     .filter((channel) => channel.archived)
     .sort((a, b) => (b.archivedAt ?? b.position) - (a.archivedAt ?? a.position));
   const normalChannels = channels.filter((channel) => !channel.archived).sort((a, b) => b.position - a.position);
-  const orderedNormalChannels = dragOrder
-    ? dragOrder.map((id) => normalChannels.find((channel) => channel.id === id)).filter((channel): channel is ChannelRecord => Boolean(channel))
-    : normalChannels;
-  const visibleChannels = [
-    ...orderedNormalChannels,
-    ...channels.filter((channel) => channel.archived && channel.id === openedArchivedId),
-  ];
-  const draggedChannel = dragState ? channels.find((channel) => channel.id === dragState.id) : null;
-
-  useLayoutEffect(() => {
-    if (!dragState) return;
-    const nextRects = new Map<string, DOMRect>();
-    chipRefs.current.forEach((element, id) => {
-      const rect = element.getBoundingClientRect();
-      nextRects.set(id, rect);
-      const previous = previousRects.current.get(id);
-      if (!previous) return;
-      const dx = previous.left - rect.left;
-      if (Math.abs(dx) > 0.5) {
-        element.animate([{ transform: `translateX(${dx}px)` }, { transform: "translateX(0)" }], {
-          duration: 180,
-          easing: "cubic-bezier(.2,.8,.2,1)",
-        });
-      }
-    });
-    previousRects.current = nextRects;
-  }, [dragOrder, dragState]);
-
-  const startPointerReorder = (channel: ChannelRecord, event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!admin || channel.archived || event.button !== 0) return;
-    const element = event.currentTarget;
-    const rect = element.getBoundingClientRect();
-    const initialOrder = normalChannels.map((item) => item.id);
-    let started = false;
-    let holdTimer = 0;
-    let latestX = event.clientX;
-    let latestY = event.clientY;
-    const startX = event.clientX;
-    const startY = event.clientY;
-
-    const begin = () => {
-      if (started) return;
-      started = true;
-      cancelLongPress();
-      previousRects.current = new Map(Array.from(chipRefs.current, ([id, chip]) => [id, chip.getBoundingClientRect()]));
-      const next: ChannelDragState = {
-        id: channel.id,
-        pointerId: event.pointerId,
-        x: latestX,
-        y: latestY,
-        offsetX: startX - rect.left,
-        offsetY: startY - rect.top,
-        width: rect.width,
-        height: rect.height,
-      };
-      activeDrag.current = next;
-      dragOrderRef.current = initialOrder;
-      setDragState(next);
-      setDragOrder(initialOrder);
-      suppressClick.current = true;
-      document.body.classList.add("is-channel-reordering");
-    };
-    if (event.pointerType === "touch") holdTimer = window.setTimeout(begin, 320);
-
-    const move = (pointerEvent: PointerEvent) => {
-      if (pointerEvent.pointerId !== event.pointerId) return;
-      latestX = pointerEvent.clientX;
-      latestY = pointerEvent.clientY;
-      const distance = Math.hypot(latestX - startX, latestY - startY);
-      if (!started) {
-        if (event.pointerType === "touch") {
-          if (distance > 8) finish(pointerEvent, false);
-          return;
-        }
-        if (distance < 4) return;
-        begin();
-      }
-      pointerEvent.preventDefault();
-      setDragState((current) => current ? { ...current, x: latestX, y: latestY } : current);
-
-      const scroll = scrollRef.current;
-      if (scroll) {
-        const bounds = scroll.getBoundingClientRect();
-        if (latestX < bounds.left + 36) scroll.scrollLeft -= 12;
-        else if (latestX > bounds.right - 36) scroll.scrollLeft += 12;
-      }
-      const currentOrder = dragOrderRef.current ?? initialOrder;
-      const remaining = currentOrder.filter((id) => id !== channel.id);
-      const insertionIndex = remaining.findIndex((id) => {
-        const chip = chipRefs.current.get(id);
-        if (!chip) return false;
-        const chipRect = chip.getBoundingClientRect();
-        return latestX < chipRect.left + chipRect.width / 2;
-      });
-      const nextOrder = [...remaining];
-      nextOrder.splice(insertionIndex < 0 ? remaining.length : insertionIndex, 0, channel.id);
-      if (nextOrder.join("|") !== currentOrder.join("|")) {
-        dragOrderRef.current = nextOrder;
-        setDragOrder(nextOrder);
-      }
-    };
-    const finish = (pointerEvent: PointerEvent, commit: boolean) => {
-      if (pointerEvent.pointerId !== event.pointerId) return;
-      window.clearTimeout(holdTimer);
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", up);
-      document.removeEventListener("pointercancel", cancel);
-      if (started && commit) {
-        const finalIds = dragOrderRef.current ?? initialOrder;
-        if (finalIds.join("|") !== initialOrder.join("|")) {
-          const byId = new Map(normalChannels.map((item) => [item.id, item]));
-          onReorder(finalIds.map((id) => byId.get(id)).filter((item): item is ChannelRecord => Boolean(item)));
-        }
-      }
-      if (started) {
-        activeDrag.current = null;
-        dragOrderRef.current = null;
-        setDragState(null);
-        setDragOrder(null);
-        document.body.classList.remove("is-channel-reordering");
-        window.clearTimeout(suppressClickTimer.current);
-        suppressClickTimer.current = window.setTimeout(() => { suppressClick.current = false; }, 350);
-      }
-    };
-    const up = (pointerEvent: PointerEvent) => finish(pointerEvent, true);
-    const cancel = (pointerEvent: PointerEvent) => finish(pointerEvent, false);
-    document.addEventListener("pointermove", move, { passive: false });
-    document.addEventListener("pointerup", up);
-    document.addEventListener("pointercancel", cancel);
+  const activeChannel = activeId ? normalChannels.find((channel) => channel.id === activeId) : null;
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    setActiveId(String(active.id));
+    suppressClick.current = true;
+  };
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveId(null);
+    window.clearTimeout(suppressClickTimer.current);
+    suppressClickTimer.current = window.setTimeout(() => { suppressClick.current = false; }, 250);
+    if (!over || active.id === over.id) return;
+    const oldIndex = normalChannels.findIndex((channel) => channel.id === active.id);
+    const newIndex = normalChannels.findIndex((channel) => channel.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    onReorder(arrayMove(normalChannels, oldIndex, newIndex));
+  };
+  const handleDragCancel = () => {
+    setActiveId(null);
+    suppressClick.current = false;
   };
   const create = () => {
     if (!val.trim()) return;
@@ -978,78 +860,74 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   useEffect(() => () => {
     window.clearTimeout(longPressTimer.current);
     window.clearTimeout(suppressClickTimer.current);
-    document.body.classList.remove("is-channel-reordering");
   }, []);
   return (
-    <nav className="channels">
-      <div ref={scrollRef} className="ch-scroll">
-        {visibleChannels.map((channel) => dragState?.id === channel.id ? (
-          <span
-            key={channel.id}
-            className="channel-drag-placeholder"
-            style={{ width: dragState.width, height: dragState.height }}
-            aria-hidden="true"
-          />
-        ) : (
-          <button
-            key={channel.id}
-            ref={(element) => {
-              if (element) chipRefs.current.set(channel.id, element);
-              else chipRefs.current.delete(channel.id);
-            }}
-            className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""} ${admin && !channel.archived ? "is-reorderable" : ""}`}
-            onClick={() => {
-              if (suppressClick.current) {
-                suppressClick.current = false;
-                window.clearTimeout(suppressClickTimer.current);
-                return;
-              }
-              if (!channel.archived) setOpenedArchivedId(null);
-              onPick(channel);
-            }}
-            onContextMenu={(event) => {
-              if (!admin) return;
-              event.preventDefault();
-              if (!channel.archived && (activeDrag.current || (event.nativeEvent as PointerEvent).pointerType === "touch")) return;
-              openMenu(channel, event.clientX, event.clientY);
-            }}
-            onKeyDown={(event) => {
-              if (admin && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[restrictToHorizontalAxis]}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
+      <nav className="channels">
+        <div className="ch-scroll">
+          <SortableContext items={normalChannels.map((channel) => channel.id)} strategy={horizontalListSortingStrategy}>
+            {normalChannels.map((channel) => (
+              <SortableChannelChip
+                key={channel.id}
+                channel={channel}
+                current={current}
+                count={counts[channel.id] ?? 0}
+                admin={admin}
+                suppressClick={suppressClick}
+                onPick={() => { setOpenedArchivedId(null); onPick(channel); }}
+                onOpenMenu={(x, y) => openMenu(channel, x, y)}
+              />
+            ))}
+          </SortableContext>
+          {channels.filter((channel) => channel.archived && channel.id === openedArchivedId).map((channel) => (
+            <button
+              key={channel.id}
+              className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""}`}
+              onClick={() => {
+                if (suppressClick.current) { suppressClick.current = false; return; }
+                onPick(channel);
+              }}
+              onContextMenu={(event) => {
+                if (!admin) return;
                 event.preventDefault();
-                const rect = event.currentTarget.getBoundingClientRect();
-                openMenu(channel, rect.left, rect.bottom + 4);
-              }
-            }}
-            onPointerDown={(event) => {
-              if (!admin) return;
-              if (!channel.archived) {
-                startPointerReorder(channel, event);
-                return;
-              }
-              if (event.pointerType === "mouse") return;
-              cancelLongPress();
-              longPressStart.current = { x: event.clientX, y: event.clientY };
-              longPressTimer.current = window.setTimeout(() => {
-                suppressClick.current = true;
-                window.clearTimeout(suppressClickTimer.current);
-                suppressClickTimer.current = window.setTimeout(() => { suppressClick.current = false; }, 1000);
                 openMenu(channel, event.clientX, event.clientY);
-              }, 550);
-            }}
-            onPointerMove={(event) => {
-              if (!channel.archived) return;
-              if (Math.hypot(event.clientX - longPressStart.current.x, event.clientY - longPressStart.current.y) > 8) cancelLongPress();
-            }}
-            onPointerUp={() => { if (channel.archived) cancelLongPress(); }}
-            onPointerCancel={() => { if (channel.archived) cancelLongPress(); }}
-            aria-haspopup={admin ? "menu" : undefined}
-            title={admin ? (channel.archived ? "우클릭하거나 길게 눌러 채널 관리" : "드래그하여 순서 변경 · 우클릭하여 관리") : undefined}
-          >
-            {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
-            {channel.name}
-            {counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}
-          </button>
-        ))}
+              }}
+              onKeyDown={(event) => {
+                if (admin && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openMenu(channel, rect.left, rect.bottom + 4);
+                }
+              }}
+              onPointerDown={(event) => {
+                if (!admin || event.pointerType === "mouse") return;
+                cancelLongPress();
+                longPressStart.current = { x: event.clientX, y: event.clientY };
+                longPressTimer.current = window.setTimeout(() => {
+                  suppressClick.current = true;
+                  openMenu(channel, event.clientX, event.clientY);
+                }, 550);
+              }}
+              onPointerMove={(event) => {
+                if (Math.hypot(event.clientX - longPressStart.current.x, event.clientY - longPressStart.current.y) > 8) cancelLongPress();
+              }}
+              onPointerUp={cancelLongPress}
+              onPointerCancel={cancelLongPress}
+              aria-haspopup={admin ? "menu" : undefined}
+              title={admin ? "우클릭하거나 길게 눌러 채널 관리" : undefined}
+            >
+              {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+              {channel.name}
+              {counts[channel.id] ? <span className="ch-count">{counts[channel.id]}</span> : null}
+            </button>
+          ))}
         {admin && (adding ? (
           <span className="ch-add-edit">
             <input autoFocus value={val} placeholder="채널 이름" onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => {
@@ -1065,24 +943,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
         ) : (
           <button className="chip ch-add" onClick={() => setAdding(true)}><I.plus s={13} />채널</button>
         ))}
-      </div>
-      {dragState && draggedChannel && (
-        <button
-          className={`chip channel-drag-ghost ${draggedChannel.type === "submission" ? "is-submission" : ""} ${current === draggedChannel.id ? "on" : ""}`}
-          style={{
-            left: dragState.x - dragState.offsetX,
-            top: dragState.y - dragState.offsetY,
-            width: dragState.width,
-            height: dragState.height,
-          }}
-          tabIndex={-1}
-          aria-hidden="true"
-        >
-          {draggedChannel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
-          {draggedChannel.name}
-          {counts[draggedChannel.id] ? <span className="ch-count">{counts[draggedChannel.id]}</span> : null}
-        </button>
-      )}
+        </div>
       {archivedChannels.length > 0 && (
         <details ref={archiveDetailsRef} className="archive-dropdown">
           <summary aria-label={`아카이브된 채널 ${archivedChannels.length}개`}>
@@ -1111,7 +972,78 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
         </div>
       )}
       {editing && <ChannelEditModal channel={editing} onClose={() => setEditing(null)} onSubmit={onEdit} />}
-    </nav>
+      </nav>
+      <DragOverlay
+        adjustScale={false}
+        dropAnimation={{ duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" }}
+        modifiers={[restrictToHorizontalAxis]}
+        zIndex={300}
+      >
+        {activeChannel ? (
+          <button
+            className={`chip channel-drag-ghost ${activeChannel.type === "submission" ? "is-submission" : ""} ${current === activeChannel.id ? "on" : ""}`}
+            tabIndex={-1}
+            aria-hidden="true"
+          >
+            {activeChannel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+            {activeChannel.name}
+            {counts[activeChannel.id] ? <span className="ch-count">{counts[activeChannel.id]}</span> : null}
+          </button>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function SortableChannelChip({ channel, current, count, admin, suppressClick, onPick, onOpenMenu }: {
+  channel: ChannelRecord;
+  current: string;
+  count: number;
+  admin: boolean;
+  suppressClick: React.MutableRefObject<boolean>;
+  onPick: () => void;
+  onOpenMenu: (x: number, y: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: channel.id,
+    disabled: !admin,
+    transition: { duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" },
+  });
+  return (
+    <button
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""} ${admin ? "is-reorderable" : ""}`}
+      style={{
+        transform: CSS.Transform.toString(transform ? { ...transform, y: 0 } : null),
+        transition,
+        opacity: isDragging ? 0 : undefined,
+      }}
+      onClick={() => {
+        if (suppressClick.current) return;
+        onPick();
+      }}
+      onContextMenu={(event) => {
+        if (!admin) return;
+        event.preventDefault();
+        if ((event.nativeEvent as PointerEvent).pointerType === "touch") return;
+        onOpenMenu(event.clientX, event.clientY);
+      }}
+      onKeyDown={(event) => {
+        if (admin && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onOpenMenu(rect.left, rect.bottom + 4);
+        }
+      }}
+      aria-haspopup={admin ? "menu" : undefined}
+      title={admin ? "드래그하여 순서 변경 · 우클릭하여 관리" : undefined}
+    >
+      {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+      {channel.name}
+      {count ? <span className="ch-count">{count}</span> : null}
+    </button>
   );
 }
 
