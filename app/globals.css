@@ -192,16 +192,16 @@ kbd {
 .archive-dropdown-menu button > small { color: var(--faint); font-family: var(--mono); font-size: 10px; }
 
 .feed { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
-.feed-inner { max-width: 688px; margin: 0 auto; padding: 0 24px 80px; }
+.feed-inner { max-width: 688px; margin: 0 auto; padding: 20px 24px 120px; }
 .app.col-two .feed-inner { max-width: 1360px; }
 .composer {
-  position: sticky;
-  top: 0;
   z-index: 15;
-  padding: 16px 0 12px;
-  background: linear-gradient(var(--bg) 72%, transparent);
+  flex: 0 0 auto;
+  width: min(1240px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 12px 0 24px;
+  background: transparent;
 }
-.app.tex .composer { background: linear-gradient(color-mix(in oklch, var(--bg) 96%, white) 72%, transparent); }
 .composer-rest {
   display: flex;
   align-items: center;
@@ -211,15 +211,17 @@ kbd {
   padding: 14px 16px;
   border-radius: var(--radius);
   border: 1.5px dashed var(--hair-2);
-  background: var(--surface);
+  background: transparent;
   color: var(--muted);
-  transition: .18s;
+  box-shadow: 0 14px 34px -18px oklch(0.30 0.025 65 / .42), 0 4px 12px -8px oklch(0.38 0.02 70 / .28);
+  backdrop-filter: saturate(1.08) blur(8px);
+  transition: border-color .18s, box-shadow .18s, transform .18s;
 }
-.composer-rest:hover { border-color: var(--accent); background: var(--accent-soft); }
+.composer-rest:hover { border-color: var(--accent); background: transparent; box-shadow: 0 18px 40px -18px oklch(0.30 0.025 65 / .48), 0 6px 16px -10px oklch(0.38 0.02 70 / .34); transform: translateY(-1px); }
 .ck { display: flex; gap: 3px; }
 .composer-hint { flex: 1; font-size: 14px; min-width: 0; }
 .composer-cta { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent-ink); font-size: 13.5px; white-space: nowrap; }
-.composer-edit { border-radius: var(--radius); border: 1.5px solid var(--accent); background: var(--surface); box-shadow: var(--shadow-lift); overflow: hidden; }
+.composer-edit { border-radius: var(--radius); border: 1.5px solid var(--accent); background: transparent; box-shadow: 0 18px 42px -20px oklch(0.30 0.025 65 / .48), 0 5px 16px -10px oklch(0.38 0.02 70 / .34); backdrop-filter: saturate(1.08) blur(10px); overflow: hidden; }
 .composer-edit textarea {
   width: 100%;
   border: none;
@@ -235,6 +237,13 @@ kbd {
 }
 .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px 11px; }
 .composer-tip { font-size: 11.5px; color: var(--faint); }
+.composer-tip.is-error { color: oklch(0.52 0.15 28); }
+.composer-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.composer-file { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 7px 5px 9px; border: 1px solid var(--hair); border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: 12px; }
+.composer-file > span { overflow: hidden; max-width: 220px; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.composer-file small { color: var(--faint); font-family: var(--mono); }
+.composer-file button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border-radius: 5px; color: var(--faint); line-height: 1; }
+.composer-file button:hover { color: var(--ink); background: var(--hair); }
 .composer-btns { display: flex; gap: 8px; flex: 0 0 auto; }
 .btn-ghost { font-size: 13px; font-weight: 540; color: var(--muted); padding: 7px 13px; border-radius: 9px; }
 .btn-ghost:hover { background: var(--surface-2); color: var(--ink); }
@@ -515,6 +524,7 @@ button.submission-person.submitted:hover { border-color: var(--accent); backgrou
 
 @media (max-width: 1200px) {
   .app.col-two .feed-inner { max-width: 688px; }
+  .composer { width: min(620px, calc(100% - 48px)); }
   .app.col-two .session-items { column-count: 1; column-gap: 0; }
   .app.col-two .card { margin-bottom: 14px; }
   .app.pile-stack.col-two .session-items { display: flex; flex-direction: column; gap: 0; }
@@ -528,6 +538,7 @@ button.submission-person.submitted:hover { border-color: var(--accent); backgrou
   .tb-right { overflow-x: auto; padding-bottom: 1px; }
   .board-url { flex: 1; justify-content: center; }
   .feed-inner { padding-inline: 12px; }
+  .composer { width: calc(100% - 24px); padding-bottom: 10px; }
   .composer-rest { align-items: flex-start; }
   .composer-cta { display: none; }
   .composer-foot { align-items: stretch; flex-direction: column; }

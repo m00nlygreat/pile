@@ -459,37 +459,36 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     if (list.length) toast(`${list.length}개 파일을 올렸어요`, I.file);
   };
 
-  const submitTextRef = useRef(submitText);
-  const submitFilesRef = useRef(submitFiles);
+  const shortcutSubmitTextRef = useRef(submitText);
+  const shortcutSubmitFilesRef = useRef(submitFiles);
   useEffect(() => {
-    submitTextRef.current = submitText;
-    submitFilesRef.current = submitFiles;
+    shortcutSubmitTextRef.current = submitText;
+    shortcutSubmitFilesRef.current = submitFiles;
   });
 
   useEffect(() => {
-    const h = (e: ClipboardEvent) => {
-      const tag = ((e.target as HTMLElement | null)?.tagName || "").toLowerCase();
-      if (tag === "textarea" || tag === "input") return;
-      const dt = e.clipboardData;
-      if (!dt) return;
-      const images = Array.from(dt.items).filter((item) => item.kind === "file" && item.type.startsWith("image/"));
-      if (images[0]) {
-        e.preventDefault();
-        const file = images[0].getAsFile();
-        if (file) {
-          submitFilesRef.current([new File([file], `붙여넣은-이미지-${Date.now()}.png`, { type: file.type || "image/png" })]);
-          toast("이미지를 붙여넣었어요", I.image);
-        }
+    const onShortcutPaste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editingText = target?.tagName === "TEXTAREA" || target?.tagName === "INPUT" || target?.isContentEditable;
+      if (editingText) return;
+
+      const clipboard = event.clipboardData;
+      if (!clipboard) return;
+      const files = Array.from(clipboard.files);
+      if (files.length) {
+        event.preventDefault();
+        void shortcutSubmitFilesRef.current(files);
         return;
       }
-      const text = dt.getData("text/plain");
-      if (text.trim()) {
-        e.preventDefault();
-        submitTextRef.current(text);
-      }
+
+      const text = clipboard.getData("text/plain");
+      if (!text.trim()) return;
+      event.preventDefault();
+      void shortcutSubmitTextRef.current(text);
     };
-    window.addEventListener("paste", h);
-    return () => window.removeEventListener("paste", h);
+
+    window.addEventListener("paste", onShortcutPaste);
+    return () => window.removeEventListener("paste", onShortcutPaste);
   }, []);
 
   const toggleAdmin = async () => {
@@ -673,7 +672,6 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
-          <Composer onSubmit={submitText} />
           <PinnedSection items={pinnedItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} dense={dense} />
           {currentChannel?.type === "submission" ? (
             <SubmissionBoard participants={participants} items={channelItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} dense={dense} />
@@ -702,6 +700,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
           )}
         </div>
       </main>
+      <Composer onSubmitText={submitText} onSubmitFiles={submitFiles} />
       {dragOver && <DropOverlay />}
       <Toasts toasts={toasts} />
       <CursorLayer peers={peers} feedScrollTop={feedScrollTop} />
@@ -1105,28 +1104,99 @@ function ChannelEditModal({ channel, onClose, onSubmit }: {
   );
 }
 
-function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
+function clipboardFileName(mime: string, index: number) {
+  const extensions: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "application/pdf": "pdf",
+  };
+  return `붙여넣은-파일-${Date.now()}-${index + 1}.${extensions[mime] ?? "bin"}`;
+}
+
+function Composer({ onSubmitText, onSubmitFiles }: {
+  onSubmitText: (text: string) => Promise<void>;
+  onSubmitFiles: (files: File[]) => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [reading, setReading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [clipboardError, setClipboardError] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (open) ref.current?.focus(); }, [open]);
-  const submit = () => {
-    if (!draft.trim()) return;
-    onSubmit(draft);
+
+  const stageClipboard = (text: string, nextFiles: File[]) => {
+    setOpen(true);
+    setClipboardError("");
+    if (text.trim()) setDraft((current) => current ? `${current}\n${text}` : text);
+    if (nextFiles.length) setFiles((current) => [...current, ...nextFiles]);
+  };
+
+  const readClipboard = async () => {
+    setOpen(true);
+    setReading(true);
+    setClipboardError("");
+    try {
+      if (navigator.clipboard?.read) {
+        const clipboardItems = await navigator.clipboard.read();
+        const pastedFiles: File[] = [];
+        let text = "";
+        for (const item of clipboardItems) {
+          const fileType = item.types.find((type) => !type.startsWith("text/"));
+          if (fileType) {
+            const blob = await item.getType(fileType);
+            pastedFiles.push(new File([blob], clipboardFileName(fileType, pastedFiles.length), { type: fileType }));
+          } else if (item.types.includes("text/plain")) {
+            text += await (await item.getType("text/plain")).text();
+          }
+        }
+        stageClipboard(text, pastedFiles);
+      } else if (navigator.clipboard?.readText) {
+        stageClipboard(await navigator.clipboard.readText(), []);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+    } catch {
+      setClipboardError("클립보드 권한을 허용하거나 Ctrl+V로 붙여넣어 주세요.");
+    } finally {
+      setReading(false);
+    }
+  };
+
+  const reset = () => {
     setDraft("");
+    setFiles([]);
+    setClipboardError("");
     setOpen(false);
   };
+
+  const submit = async () => {
+    if ((!draft.trim() && files.length === 0) || submitting) return;
+    setSubmitting(true);
+    try {
+      if (draft.trim()) await onSubmitText(draft);
+      if (files.length) await onSubmitFiles(files);
+      reset();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className={`composer ${open ? "open" : ""}`}>
       {!open ? (
-        <button className="composer-rest" onClick={() => setOpen(true)}><span className="ck"><kbd>Ctrl</kbd><kbd>V</kbd></span><span className="composer-hint">여기에 붙여넣기 — 텍스트 · 링크 · 파일을 던져 두세요</span><span className="composer-cta"><I.clip s={15} />붙여넣기</span></button>
+        <button className="composer-rest" onClick={readClipboard} disabled={reading}><span className="ck"><kbd>Ctrl</kbd><kbd>V</kbd></span><span className="composer-hint">클릭해서 클립보드 붙여넣기 — 텍스트 · 링크 · 파일</span><span className="composer-cta"><I.clip s={15} />{reading ? "읽는 중…" : "붙여넣기"}</span></button>
       ) : (
         <div className="composer-edit">
           <textarea ref={ref} value={draft} placeholder="텍스트나 링크를 붙여넣고 Enter… (Markdown 지원)" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
-            if (e.key === "Escape") { setOpen(false); setDraft(""); }
+            if (e.key === "Escape") reset();
           }} />
-          <div className="composer-foot"><span className="composer-tip">텍스트는 그대로, URL은 링크로, 이미지는 파일로 자동 분류됩니다</span><span className="composer-btns"><button className="btn-ghost" onClick={() => { setOpen(false); setDraft(""); }}>취소</button><button className="btn-pri" onClick={submit} disabled={!draft.trim()}>올리기<kbd>⌘↵</kbd></button></span></div>
+          {files.length > 0 && <div className="composer-files">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${index}`}><I.file s={13} /><span>{file.name}</span><small>{fmtSize(file.size)}</small><button type="button" aria-label={`${file.name} 제거`} onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))}>×</button></span>)}</div>}
+          <div className="composer-foot"><span className={`composer-tip ${clipboardError ? "is-error" : ""}`}>{clipboardError || "텍스트와 URL, 클립보드의 파일을 확인한 뒤 올릴 수 있습니다"}</span><span className="composer-btns"><button className="btn-ghost" onClick={reset} disabled={submitting}>취소</button><button className="btn-pri" onClick={submit} disabled={(!draft.trim() && files.length === 0) || submitting}>{submitting ? "올리는 중…" : "올리기"}<kbd>⌘↵</kbd></button></span></div>
         </div>
       )}
     </div>
@@ -1301,7 +1371,7 @@ function PinnedSection({ items, me, admin, onDelete, onCopy, onReact, reactions,
 }
 
 function EmptyState() {
-  return <div className="empty"><div className="empty-pile"><span /><span /><span /></div><h3>아직 더미가 비어 있어요</h3><p>위에 무엇이든 붙여넣거나 파일을 끌어다 놓으면<br />이 채널에 첫 자료가 쌓입니다.</p></div>;
+  return <div className="empty"><div className="empty-pile"><span /><span /><span /></div><h3>아직 더미가 비어 있어요</h3><p>아래에서 무엇이든 붙여넣거나 파일을 끌어다 놓으면<br />이 채널에 첫 자료가 쌓입니다.</p></div>;
 }
 
 function DropOverlay() {

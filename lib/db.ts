@@ -170,8 +170,9 @@ export async function setAdminSession(enabled: boolean) {
   jar.set("pile_admin", enabled ? "1" : "", {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: enabled ? 60 * 60 * 8 : 0,
+    maxAge: enabled ? 60 * 60 * 24 * 30 : 0,
   });
 }
 
