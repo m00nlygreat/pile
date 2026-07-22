@@ -121,8 +121,8 @@ kbd {
 .live-dot.on { background: oklch(0.6 0.15 145); animation: livepulse 2.5s ease infinite; }
 @keyframes livepulse { 0%, 100% { opacity: .7; } 50% { opacity: 1; } }
 
-.channels { flex: 0 0 auto; padding: 0 14px; background: var(--bg); border-bottom: 1px solid var(--hair); position: relative; z-index: 20; }
-.ch-scroll { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 9px 8px; scrollbar-width: none; }
+.channels { display: flex; align-items: center; flex: 0 0 auto; padding: 0 14px; background: var(--bg); border-bottom: 1px solid var(--hair); position: relative; z-index: 20; }
+.ch-scroll { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; gap: 6px; overflow-x: auto; padding: 9px 8px; scrollbar-width: none; }
 .ch-scroll::-webkit-scrollbar { display: none; }
 .chip {
   display: inline-flex;
@@ -139,6 +139,11 @@ kbd {
 }
 .chip svg { opacity: .45; }
 .chip:hover { background: var(--surface); color: var(--ink); }
+.chip.is-reorderable { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.chip.is-reorderable:active { cursor: grabbing; }
+.channel-drag-placeholder { flex: 0 0 auto; border: 1px dashed color-mix(in oklch, var(--accent) 70%, transparent); border-radius: 999px; background: color-mix(in oklch, var(--accent-soft) 55%, transparent); box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--accent-soft) 50%, transparent); }
+.channel-drag-ghost { position: fixed; z-index: 300; margin: 0; pointer-events: none; cursor: grabbing; transform: scale(1.045) rotate(-1deg); box-shadow: 0 12px 28px -10px oklch(0.3 0.04 60 / .42); }
+body.is-channel-reordering { cursor: grabbing; user-select: none; }
 .chip.on { background: var(--surface); color: var(--ink); border-color: var(--hair-2); box-shadow: var(--shadow-card); font-weight: 600; }
 .chip.on svg { opacity: .75; color: var(--accent); }
 .chip.is-submission svg { color: var(--accent-ink); opacity: .65; }
@@ -176,6 +181,17 @@ kbd {
 .channel-menu button:hover, .channel-menu button:focus-visible { background: var(--surface-2); outline: none; }
 .channel-menu button.danger { color: oklch(0.52 0.2 28); }
 .channel-menu button.danger:hover, .channel-menu button.danger:focus-visible { background: oklch(0.96 0.025 28); }
+.archive-dropdown { position: relative; flex: 0 0 auto; margin-left: 4px; }
+.archive-dropdown summary { display: inline-flex; align-items: center; gap: 5px; padding: 7px 10px; border-left: 1px solid var(--hair); color: var(--faint); font-size: 12px; cursor: pointer; list-style: none; white-space: nowrap; }
+.archive-dropdown summary::-webkit-details-marker { display: none; }
+.archive-dropdown summary:hover, .archive-dropdown[open] summary { color: var(--ink); }
+.archive-dropdown summary > span { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; color: var(--accent-ink); background: var(--accent-soft); font-family: var(--mono); font-size: 10px; }
+.archive-dropdown[open] summary > svg:last-child { transform: rotate(180deg); }
+.archive-dropdown-menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: 230; width: 220px; max-height: min(360px, 55vh); overflow-y: auto; padding: 5px; border: 1px solid var(--hair-2); border-radius: 12px; background: var(--surface); box-shadow: 0 14px 38px -12px oklch(0.3 0.04 60 / .38); }
+.archive-dropdown-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border-radius: 8px; color: var(--muted); font-size: 13px; text-align: left; }
+.archive-dropdown-menu button:hover, .archive-dropdown-menu button:focus-visible { color: var(--ink); background: var(--surface-2); outline: none; }
+.archive-dropdown-menu button > span { overflow: hidden; flex: 1 1 auto; text-overflow: ellipsis; white-space: nowrap; }
+.archive-dropdown-menu button > small { color: var(--faint); font-family: var(--mono); font-size: 10px; }
 
 .feed { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
 .feed-inner { max-width: 688px; margin: 0 auto; padding: 0 24px 80px; }

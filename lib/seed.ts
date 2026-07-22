@@ -5,4 +5,4 @@ export const DEFAULT_CHANNELS = [
 ];
 
 export const seedChannels = (boardId: string): ChannelRecord[] =>
-  DEFAULT_CHANNELS.map((channel, position) => ({ ...channel, boardId, position }));
+  DEFAULT_CHANNELS.map((channel, position) => ({ ...channel, boardId, position, archived: false, archivedAt: null }));

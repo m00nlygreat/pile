@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
@@ -519,7 +519,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   };
   const pickChannel = useCallback((next: ChannelRecord) => {
     setChannel(next.id);
-    router.push(channelPath(boardId, next));
+    if (!next.archived) router.push(channelPath(boardId, next));
   }, [boardId, router]);
   const editChannel = async (target: ChannelRecord, name: string, slug: string) => {
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, {
@@ -560,6 +560,43 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     }
     const deletedItems = payload.deletedItems ?? itemCount;
     toast(deletedItems ? `#${target.name} 채널과 게시물 ${deletedItems}개를 삭제했어요` : `#${target.name} 채널을 삭제했어요`, I.trash);
+  };
+  const archiveChannel = async (target: ChannelRecord, archived: boolean) => {
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      toast(payload?.error ?? "채널의 아카이브 상태를 바꿀 수 없어요", I.archive);
+      return;
+    }
+    const payload = (await res.json()) as { archivedAt: number | null };
+    setChannels((prev) => prev.map((item) => (item.id === target.id ? { ...item, archived, archivedAt: payload.archivedAt } : item)));
+    if (archived && channel === target.id) {
+      const fallback = channels.find((item) => item.id !== target.id && !item.archived);
+      if (fallback) {
+        setChannel(fallback.id);
+        router.push(channelPath(boardId, fallback));
+      }
+    }
+    toast(archived ? `#${target.name} 채널을 아카이브했어요` : `#${target.name} 채널을 복원했어요`, I.archive);
+  };
+  const reorderChannelList = async (ordered: ChannelRecord[]) => {
+    const previous = channels;
+    const positions = channels.filter((item) => !item.archived).map((item) => item.position).sort((a, b) => b - a);
+    const positionById = new Map(ordered.map((item, index) => [item.id, positions[index]]));
+    setChannels((prev) => prev.map((item) => positionById.has(item.id) ? { ...item, position: positionById.get(item.id)! } : item));
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelIds: ordered.map((item) => item.id) }),
+    });
+    if (!res.ok) {
+      setChannels(previous);
+      toast("채널 순서를 저장할 수 없어요", I.hash);
+    }
   };
   const togglePin = async (item: ItemRecord) => {
     const pinned = !item.pinned;
@@ -628,7 +665,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     >
       <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} />
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
-      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onDelete={deleteChannel} />
+      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
           <Composer onSubmit={submitText} />
@@ -724,8 +761,18 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
 }
 
 type ChannelMenuState = { channel: ChannelRecord; x: number; y: number };
+type ChannelDragState = {
+  id: string;
+  pointerId: number;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
 
-function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onDelete }: {
+function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onArchive, onReorder, onDelete }: {
   channels: ChannelRecord[];
   current: string;
   counts: Record<string, number>;
@@ -733,6 +780,8 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
   onPick: (channel: ChannelRecord) => void;
   onAdd: (name: string, type: ChannelRecord["type"]) => void;
   onEdit: (channel: ChannelRecord, name: string, slug: string) => Promise<string | null>;
+  onArchive: (channel: ChannelRecord, archived: boolean) => void;
+  onReorder: (channels: ChannelRecord[]) => void;
   onDelete: (channel: ChannelRecord) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -740,11 +789,154 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
   const [type, setType] = useState<ChannelRecord["type"]>("standard");
   const [menu, setMenu] = useState<ChannelMenuState | null>(null);
   const [editing, setEditing] = useState<ChannelRecord | null>(null);
+  const [openedArchivedId, setOpenedArchivedId] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<ChannelDragState | null>(null);
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const longPressTimer = useRef(0);
   const suppressClickTimer = useRef(0);
   const longPressStart = useRef({ x: 0, y: 0 });
   const suppressClick = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const archiveDetailsRef = useRef<HTMLDetailsElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previousRects = useRef(new Map<string, DOMRect>());
+  const activeDrag = useRef<ChannelDragState | null>(null);
+  const dragOrderRef = useRef<string[] | null>(null);
+  const archivedChannels = channels
+    .filter((channel) => channel.archived)
+    .sort((a, b) => (b.archivedAt ?? b.position) - (a.archivedAt ?? a.position));
+  const normalChannels = channels.filter((channel) => !channel.archived).sort((a, b) => b.position - a.position);
+  const orderedNormalChannels = dragOrder
+    ? dragOrder.map((id) => normalChannels.find((channel) => channel.id === id)).filter((channel): channel is ChannelRecord => Boolean(channel))
+    : normalChannels;
+  const visibleChannels = [
+    ...orderedNormalChannels,
+    ...channels.filter((channel) => channel.archived && channel.id === openedArchivedId),
+  ];
+  const draggedChannel = dragState ? channels.find((channel) => channel.id === dragState.id) : null;
+
+  useLayoutEffect(() => {
+    if (!dragState) return;
+    const nextRects = new Map<string, DOMRect>();
+    chipRefs.current.forEach((element, id) => {
+      const rect = element.getBoundingClientRect();
+      nextRects.set(id, rect);
+      const previous = previousRects.current.get(id);
+      if (!previous) return;
+      const dx = previous.left - rect.left;
+      if (Math.abs(dx) > 0.5) {
+        element.animate([{ transform: `translateX(${dx}px)` }, { transform: "translateX(0)" }], {
+          duration: 180,
+          easing: "cubic-bezier(.2,.8,.2,1)",
+        });
+      }
+    });
+    previousRects.current = nextRects;
+  }, [dragOrder, dragState]);
+
+  const startPointerReorder = (channel: ChannelRecord, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!admin || channel.archived || event.button !== 0) return;
+    const element = event.currentTarget;
+    const rect = element.getBoundingClientRect();
+    const initialOrder = normalChannels.map((item) => item.id);
+    let started = false;
+    let holdTimer = 0;
+    let latestX = event.clientX;
+    let latestY = event.clientY;
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    const begin = () => {
+      if (started) return;
+      started = true;
+      cancelLongPress();
+      previousRects.current = new Map(Array.from(chipRefs.current, ([id, chip]) => [id, chip.getBoundingClientRect()]));
+      const next: ChannelDragState = {
+        id: channel.id,
+        pointerId: event.pointerId,
+        x: latestX,
+        y: latestY,
+        offsetX: startX - rect.left,
+        offsetY: startY - rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+      activeDrag.current = next;
+      dragOrderRef.current = initialOrder;
+      setDragState(next);
+      setDragOrder(initialOrder);
+      suppressClick.current = true;
+      document.body.classList.add("is-channel-reordering");
+    };
+    if (event.pointerType === "touch") holdTimer = window.setTimeout(begin, 320);
+
+    const move = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== event.pointerId) return;
+      latestX = pointerEvent.clientX;
+      latestY = pointerEvent.clientY;
+      const distance = Math.hypot(latestX - startX, latestY - startY);
+      if (!started) {
+        if (event.pointerType === "touch") {
+          if (distance > 8) finish(pointerEvent, false);
+          return;
+        }
+        if (distance < 4) return;
+        begin();
+      }
+      pointerEvent.preventDefault();
+      setDragState((current) => current ? { ...current, x: latestX, y: latestY } : current);
+
+      const scroll = scrollRef.current;
+      if (scroll) {
+        const bounds = scroll.getBoundingClientRect();
+        if (latestX < bounds.left + 36) scroll.scrollLeft -= 12;
+        else if (latestX > bounds.right - 36) scroll.scrollLeft += 12;
+      }
+      const currentOrder = dragOrderRef.current ?? initialOrder;
+      const remaining = currentOrder.filter((id) => id !== channel.id);
+      const insertionIndex = remaining.findIndex((id) => {
+        const chip = chipRefs.current.get(id);
+        if (!chip) return false;
+        const chipRect = chip.getBoundingClientRect();
+        return latestX < chipRect.left + chipRect.width / 2;
+      });
+      const nextOrder = [...remaining];
+      nextOrder.splice(insertionIndex < 0 ? remaining.length : insertionIndex, 0, channel.id);
+      if (nextOrder.join("|") !== currentOrder.join("|")) {
+        dragOrderRef.current = nextOrder;
+        setDragOrder(nextOrder);
+      }
+    };
+    const finish = (pointerEvent: PointerEvent, commit: boolean) => {
+      if (pointerEvent.pointerId !== event.pointerId) return;
+      window.clearTimeout(holdTimer);
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", cancel);
+      if (started && commit) {
+        const finalIds = dragOrderRef.current ?? initialOrder;
+        if (finalIds.join("|") !== initialOrder.join("|")) {
+          const byId = new Map(normalChannels.map((item) => [item.id, item]));
+          onReorder(finalIds.map((id) => byId.get(id)).filter((item): item is ChannelRecord => Boolean(item)));
+        }
+      }
+      if (started) {
+        activeDrag.current = null;
+        dragOrderRef.current = null;
+        setDragState(null);
+        setDragOrder(null);
+        document.body.classList.remove("is-channel-reordering");
+        window.clearTimeout(suppressClickTimer.current);
+        suppressClickTimer.current = window.setTimeout(() => { suppressClick.current = false; }, 350);
+      }
+    };
+    const up = (pointerEvent: PointerEvent) => finish(pointerEvent, true);
+    const cancel = (pointerEvent: PointerEvent) => finish(pointerEvent, false);
+    document.addEventListener("pointermove", move, { passive: false });
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", cancel);
+  };
   const create = () => {
     if (!val.trim()) return;
     onAdd(val.trim(), type);
@@ -757,7 +949,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
     setMenu({
       channel,
       x: Math.max(8, Math.min(x, window.innerWidth - 184)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 104)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 146)),
     });
   };
   const cancelLongPress = () => {
@@ -786,25 +978,39 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
   useEffect(() => () => {
     window.clearTimeout(longPressTimer.current);
     window.clearTimeout(suppressClickTimer.current);
+    document.body.classList.remove("is-channel-reordering");
   }, []);
   return (
     <nav className="channels">
-      <div className="ch-scroll">
-        {channels.map((channel) => (
+      <div ref={scrollRef} className="ch-scroll">
+        {visibleChannels.map((channel) => dragState?.id === channel.id ? (
+          <span
+            key={channel.id}
+            className="channel-drag-placeholder"
+            style={{ width: dragState.width, height: dragState.height }}
+            aria-hidden="true"
+          />
+        ) : (
           <button
             key={channel.id}
-            className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""}`}
+            ref={(element) => {
+              if (element) chipRefs.current.set(channel.id, element);
+              else chipRefs.current.delete(channel.id);
+            }}
+            className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""} ${admin && !channel.archived ? "is-reorderable" : ""}`}
             onClick={() => {
               if (suppressClick.current) {
                 suppressClick.current = false;
                 window.clearTimeout(suppressClickTimer.current);
                 return;
               }
+              if (!channel.archived) setOpenedArchivedId(null);
               onPick(channel);
             }}
             onContextMenu={(event) => {
               if (!admin) return;
               event.preventDefault();
+              if (!channel.archived && (activeDrag.current || (event.nativeEvent as PointerEvent).pointerType === "touch")) return;
               openMenu(channel, event.clientX, event.clientY);
             }}
             onKeyDown={(event) => {
@@ -815,7 +1021,12 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
               }
             }}
             onPointerDown={(event) => {
-              if (!admin || event.pointerType === "mouse") return;
+              if (!admin) return;
+              if (!channel.archived) {
+                startPointerReorder(channel, event);
+                return;
+              }
+              if (event.pointerType === "mouse") return;
               cancelLongPress();
               longPressStart.current = { x: event.clientX, y: event.clientY };
               longPressTimer.current = window.setTimeout(() => {
@@ -826,12 +1037,13 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
               }, 550);
             }}
             onPointerMove={(event) => {
+              if (!channel.archived) return;
               if (Math.hypot(event.clientX - longPressStart.current.x, event.clientY - longPressStart.current.y) > 8) cancelLongPress();
             }}
-            onPointerUp={cancelLongPress}
-            onPointerCancel={cancelLongPress}
+            onPointerUp={() => { if (channel.archived) cancelLongPress(); }}
+            onPointerCancel={() => { if (channel.archived) cancelLongPress(); }}
             aria-haspopup={admin ? "menu" : undefined}
-            title={admin ? "우클릭하거나 길게 눌러 채널 관리" : undefined}
+            title={admin ? (channel.archived ? "우클릭하거나 길게 눌러 채널 관리" : "드래그하여 순서 변경 · 우클릭하여 관리") : undefined}
           >
             {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
             {channel.name}
@@ -854,9 +1066,47 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onD
           <button className="chip ch-add" onClick={() => setAdding(true)}><I.plus s={13} />채널</button>
         ))}
       </div>
+      {dragState && draggedChannel && (
+        <button
+          className={`chip channel-drag-ghost ${draggedChannel.type === "submission" ? "is-submission" : ""} ${current === draggedChannel.id ? "on" : ""}`}
+          style={{
+            left: dragState.x - dragState.offsetX,
+            top: dragState.y - dragState.offsetY,
+            width: dragState.width,
+            height: dragState.height,
+          }}
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          {draggedChannel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+          {draggedChannel.name}
+          {counts[draggedChannel.id] ? <span className="ch-count">{counts[draggedChannel.id]}</span> : null}
+        </button>
+      )}
+      {archivedChannels.length > 0 && (
+        <details ref={archiveDetailsRef} className="archive-dropdown">
+          <summary aria-label={`아카이브된 채널 ${archivedChannels.length}개`}>
+            <I.archive s={14} />아카이브 <span>{archivedChannels.length}</span><I.chevronDown s={12} />
+          </summary>
+          <div className="archive-dropdown-menu" role="menu">
+            {archivedChannels.map((channel) => (
+              <button key={channel.id} role="menuitem" onClick={() => {
+                setOpenedArchivedId(channel.id);
+                archiveDetailsRef.current?.removeAttribute("open");
+                onPick(channel);
+              }}>
+                {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+                <span>{channel.name}</span>
+                {counts[channel.id] ? <small>{counts[channel.id]}</small> : null}
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
       {menu && (
         <div ref={menuRef} className="channel-menu" role="menu" aria-label={`${menu.channel.name} 채널 관리`} style={{ left: menu.x, top: menu.y }}>
           <button role="menuitem" onClick={() => { setEditing(menu.channel); setMenu(null); }}><I.edit s={14} />채널 수정</button>
+          <button role="menuitem" onClick={() => { const target = menu.channel; setMenu(null); onArchive(target, !target.archived); }}><I.archive s={14} />{menu.channel.archived ? "언아카이브" : "아카이브"}</button>
           <button className="danger" role="menuitem" onClick={() => { const target = menu.channel; setMenu(null); onDelete(target); }}><I.trash s={14} />채널 삭제</button>
         </div>
       )}
