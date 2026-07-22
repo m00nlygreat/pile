@@ -4,6 +4,7 @@ out/
 data/*.sqlite
 data/*.sqlite-*
 data/link-images/
+data/uploads/
 .next-dev*.log
 *.tsbuildinfo
 .env
