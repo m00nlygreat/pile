@@ -76,6 +76,12 @@ export const I = {
     </Icon>
   ),
   pin: (p: IconProps) => <Icon {...p} d="M9 4h6l-1 6 3 3v2H7v-2l3-3z M12 15v5" />,
+  archive: (p: IconProps) => (
+    <Icon {...p}>
+      <path d="M4 7h16v13H4zM3 4h18v3H3zM9 11h6" />
+    </Icon>
+  ),
+  chevronDown: (p: IconProps) => <Icon {...p} d="m7 10 5 5 5-5" />,
   poll: (p: IconProps) => (
     <Icon {...p}>
       <rect x="4" y="13" width="4" height="7" rx="1.5" />

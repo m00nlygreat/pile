@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteChannel, isAdminRequest, updateChannel } from "@/lib/db";
+import { deleteChannel, isAdminRequest, setChannelArchived, updateChannel } from "@/lib/db";
 import { isValidChannelSlug } from "@/lib/slug";
 
 export const runtime = "nodejs";
@@ -12,7 +12,14 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
   const { boardId: rawBoardId, channelId: rawChannelId } = await params;
-  const body = (await request.json()) as { name?: string; slug?: string };
+  const body = (await request.json()) as { name?: string; slug?: string; archived?: boolean };
+  const boardId = decodeURIComponent(rawBoardId);
+  const channelId = decodeURIComponent(rawChannelId);
+  if (typeof body.archived === "boolean") {
+    const result = setChannelArchived(boardId, channelId, body.archived);
+    if (!result.ok) return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
+    return NextResponse.json({ ok: true, archived: body.archived, archivedAt: result.archivedAt });
+  }
   const name = body.name?.trim();
   const slug = body.slug?.trim();
   if (!name) return NextResponse.json({ error: "채널 이름이 필요합니다." }, { status: 400 });
@@ -20,7 +27,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "slug는 영문 소문자, 숫자, 하이픈만 사용할 수 있습니다." }, { status: 400 });
   }
 
-  const result = updateChannel(decodeURIComponent(rawBoardId), decodeURIComponent(rawChannelId), name, slug);
+  const result = updateChannel(boardId, channelId, name, slug);
   if (!result.ok) {
     if (result.reason === "duplicate-slug") {
       return NextResponse.json({ error: "이미 사용 중인 slug입니다." }, { status: 409 });

@@ -14,6 +14,8 @@ export type ChannelRecord = {
   name: string;
   position: number;
   type: "standard" | "submission";
+  archived: boolean;
+  archivedAt: number | null;
 };
 
 export type LinkPayload = {
