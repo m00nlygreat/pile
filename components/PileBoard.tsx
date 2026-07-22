@@ -11,6 +11,7 @@ import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable 
 import { CSS } from "@dnd-kit/utilities";
 import { I } from "@/components/icons";
 import { renderMarkdown } from "@/components/markdown";
+import { rememberBoard } from "@/lib/recent-boards";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
@@ -345,6 +346,9 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const displayMe = me ?? { id: "", nick: "익명", display: "익명", admin: false };
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
   const currentChannel = channels.find((item) => item.id === channel) ?? channels[0];
+  useEffect(() => {
+    rememberBoard(boardId);
+  }, [boardId]);
   useEffect(() => {
     if (!me) return;
     setParticipants((prev) => (prev.some((user) => user.id === me.id) ? prev : [...prev, me]));
@@ -1188,7 +1192,7 @@ function Composer({ onSubmitText, onSubmitFiles }: {
   return (
     <div className={`composer ${open ? "open" : ""}`}>
       {!open ? (
-        <button className="composer-rest" onClick={readClipboard} disabled={reading}><span className="ck"><kbd>Ctrl</kbd><kbd>V</kbd></span><span className="composer-hint">클릭해서 클립보드 붙여넣기 — 텍스트 · 링크 · 파일</span><span className="composer-cta"><I.clip s={15} />{reading ? "읽는 중…" : "붙여넣기"}</span></button>
+        <button className="composer-rest" onClick={readClipboard} disabled={reading} aria-label={reading ? "클립보드 읽는 중" : "클립보드 붙여넣기"}><I.clip s={25} /></button>
       ) : (
         <div className="composer-edit">
           <textarea ref={ref} value={draft} placeholder="텍스트나 링크를 붙여넣고 Enter… (Markdown 지원)" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {

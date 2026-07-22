@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { readRecentBoards } from "@/lib/recent-boards";
 
 const WORDS = ["ocean", "forest", "canyon", "meadow", "harbor", "summit", "valley", "ridge"];
 
@@ -13,7 +15,12 @@ function randomId() {
 
 export default function HomePage() {
   const [input, setInput] = useState("");
+  const [recentBoards, setRecentBoards] = useState<string[]>([]);
   const router = useRouter();
+
+  useEffect(() => {
+    setRecentBoards(readRecentBoards());
+  }, []);
 
   function navigate(raw: string) {
     const id = raw.trim().replace(/\s+/g, "-").toLowerCase();
@@ -21,7 +28,7 @@ export default function HomePage() {
   }
 
   return (
-    <main style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "40px 24px" }}>
+    <main className="home-main">
       <div className="logo" style={{ fontSize: 28, marginBottom: 18 }}>
         <div className="logo-mark" style={{ width: 24, height: 24 }}>
           <span style={{ width: 14, opacity: 0.55, marginLeft: 7 }} />
@@ -64,6 +71,24 @@ export default function HomePage() {
       >
         새 보드 만들기 →
       </button>
+
+      {recentBoards.length > 0 && (
+        <section className="recent-boards" aria-labelledby="recent-boards-title">
+          <div className="recent-boards-head">
+            <h2 id="recent-boards-title">최근 방문한 보드</h2>
+            <span>{recentBoards.length}</span>
+          </div>
+          <div className="recent-board-list">
+            {recentBoards.map((boardId) => (
+              <Link className="recent-board-link" href={`/${encodeURIComponent(boardId)}`} key={boardId}>
+                <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
+                <span>{boardId}</span>
+                <b aria-hidden="true">→</b>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
