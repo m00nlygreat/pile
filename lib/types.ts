@@ -31,6 +31,7 @@ export type FilePayload = {
   size: number;
   preview?: string | null;
   dataUrl?: string | null;
+  url?: string | null;
 };
 
 export type ItemRecord = {

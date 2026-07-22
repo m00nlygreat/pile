@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { cookies } from "next/headers";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
+import { deleteStoredFileSync } from "@/lib/file-storage";
 import { slugFromChannelName, uniqueSlug } from "@/lib/slug";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
@@ -291,6 +292,7 @@ export function deleteChannel(boardId: string, channelId: string) {
   if (!current) return { ok: false as const, reason: "not-found" as const };
 
   const itemCount = conn.prepare("SELECT COUNT(*) as count FROM items WHERE board_id = ? AND channel = ?").get(boardId, channelId) as { count: number };
+  const fileRows = conn.prepare("SELECT id FROM items WHERE board_id = ? AND channel = ? AND type = 'file'").all(boardId, channelId) as { id: string }[];
   conn.exec("BEGIN IMMEDIATE");
   try {
     conn
@@ -303,6 +305,7 @@ export function deleteChannel(boardId: string, channelId: string) {
     conn.exec("ROLLBACK");
     throw error;
   }
+  fileRows.forEach((row) => deleteStoredFileSync(String(row.id)));
   return { ok: true as const, deletedItems: Number(itemCount.count) };
 }
 
@@ -389,7 +392,13 @@ export function deleteItem(itemId: string, userId: string, admin: boolean) {
   if (!admin && owner !== userId) return { ok: false, deleted: false };
   conn.prepare("DELETE FROM reactions WHERE item_id = ?").run(itemId);
   conn.prepare("DELETE FROM items WHERE id = ?").run(itemId);
+  deleteStoredFileSync(itemId);
   return { ok: true, deleted: true };
+}
+
+export function getItemFile(itemId: string) {
+  const row = getDb().prepare("SELECT file_json FROM items WHERE id = ? AND type = 'file'").get(itemId) as { file_json: string | null } | undefined;
+  return row?.file_json ? tryJson<FilePayload>(row.file_json) : null;
 }
 
 const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];

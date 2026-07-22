@@ -315,17 +315,6 @@ function buildLink(url: string): LinkPayload {
     : { url, title: url, site };
 }
 
-async function fileToPayload(file: File): Promise<FilePayload> {
-  const dataUrl = file.type.startsWith("image/")
-    ? await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.readAsDataURL(file);
-      })
-    : null;
-  return { name: file.name, mime: file.type || "application/octet-stream", size: file.size, preview: file.type.startsWith("image/") ? "drop" : null, dataUrl };
-}
-
 function channelPath(boardId: string, channel: Pick<ChannelRecord, "id" | "slug">) {
   const boardPath = `/${encodeURIComponent(boardId)}`;
   return channel.id === "default" ? boardPath : `${boardPath}/${encodeURIComponent(channel.slug)}`;
@@ -447,7 +436,20 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     const list = Array.from(files).filter((file) => file.size <= 20 * 1024 * 1024);
     await Promise.all(list.map(async (file, index) => {
       await new Promise((resolve) => window.setTimeout(resolve, index * 120));
-      await postItem({ type: "file", file: await fileToPayload(file) });
+      const author = ensureMe();
+      const user = admin ? { ...author, admin: true, display: author.display || author.nick } : author;
+      const form = new FormData();
+      form.set("file", file);
+      form.set("channel", channel);
+      form.set("user", JSON.stringify(user));
+      const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/files`, { method: "POST", body: form });
+      if (!res.ok) {
+        toast("올릴 수 없어요", I.file);
+        return;
+      }
+      const item = (await res.json()) as ItemRecord;
+      addItem(item);
+      broadcastItem(item);
     }));
     if (list.length) toast(`${list.length}개 파일을 올렸어요`, I.file);
   };
@@ -1066,9 +1068,11 @@ function LinkBody({ link }: { link: LinkPayload }) {
 
 function FileBody({ file }: { file: FilePayload }) {
   const isImg = file.mime.startsWith("image/");
-  if (isImg) return <div className="file-img">{file.dataUrl ? <img className="file-preview" src={file.dataUrl} alt={file.name} /> : <Placeholder label={`이미지 미리보기 · ${file.name}`} h={196} />}<div className="file-foot"><I.image s={14} /><span className="file-name">{file.name}</span><span className="file-sz">{fmtSize(file.size)}</span><a className="file-dl" href={file.dataUrl ?? "#"} download={file.name} title="다운로드"><I.download s={14} /></a></div></div>;
+  const source = file.url ?? file.dataUrl;
+  const downloadUrl = file.url ? `${file.url}?download=1` : source;
+  if (isImg) return <div className="file-img">{source ? <img className="file-preview" src={source} alt={file.name} /> : <Placeholder label={`이미지 미리보기 · ${file.name}`} h={196} />}<div className="file-foot"><I.image s={14} /><span className="file-name">{file.name}</span><span className="file-sz">{fmtSize(file.size)}</span><a className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={14} /></a></div></div>;
   const ext = file.name.split(".").pop()?.toUpperCase() ?? "FILE";
-  return <a className="file-doc" href={file.dataUrl ?? "#"} download={file.name} onClick={(e) => { if (!file.dataUrl) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span><span className="file-dl"><I.download s={16} /></span></a>;
+  return <a className="file-doc" href={downloadUrl ?? "#"} download={file.name} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span><span className="file-dl"><I.download s={16} /></span></a>;
 }
 
 function Reactions({ itemId, reactions, myId, onReact }: { itemId: string; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {
