@@ -454,6 +454,13 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     if (list.length) toast(`${list.length}개 파일을 올렸어요`, I.file);
   };
 
+  const submitTextRef = useRef(submitText);
+  const submitFilesRef = useRef(submitFiles);
+  useEffect(() => {
+    submitTextRef.current = submitText;
+    submitFilesRef.current = submitFiles;
+  });
+
   useEffect(() => {
     const h = (e: ClipboardEvent) => {
       const tag = ((e.target as HTMLElement | null)?.tagName || "").toLowerCase();
@@ -465,7 +472,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         e.preventDefault();
         const file = images[0].getAsFile();
         if (file) {
-          submitFiles([new File([file], `붙여넣은-이미지-${Date.now()}.png`, { type: file.type || "image/png" })]);
+          submitFilesRef.current([new File([file], `붙여넣은-이미지-${Date.now()}.png`, { type: file.type || "image/png" })]);
           toast("이미지를 붙여넣었어요", I.image);
         }
         return;
@@ -473,12 +480,12 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       const text = dt.getData("text/plain");
       if (text.trim()) {
         e.preventDefault();
-        submitText(text);
+        submitTextRef.current(text);
       }
     };
     window.addEventListener("paste", h);
     return () => window.removeEventListener("paste", h);
-  });
+  }, []);
 
   const toggleAdmin = async () => {
     const enabled = !admin;
@@ -1044,8 +1051,23 @@ function TextBody({ item, reactions, myId, onReact }: { item: ItemRecord; reacti
   const body = item.body ?? "";
   const parts = body.split(POLL_FENCE_RE);
   if (parts.length === 1) return <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />;
-  const choices = (parts[1] ?? "").replace(/^```poll\r?\n/, "").replace(/```$/, "").split("\n").map((line) => line.match(/^\s*\d+\.\s+(.+)$/)?.[1]?.trim()).filter(Boolean).slice(0, 10) as string[];
+  const choices = parsePollChoices(parts[1] ?? "");
   return <div className="md">{parts[0]?.trim() && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(parts[0]) }} />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(parts[2]) }} />}</div>;
+}
+
+function parsePollChoices(fence: string) {
+  return fence
+    .replace(/^```poll\r?\n/, "")
+    .replace(/```$/, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line
+      .replace(/^\d+\s*[.)．、]\s*/, "")
+      .replace(/^[-*+•·]\s*/, "")
+      .trim())
+    .filter(Boolean)
+    .slice(0, 10);
 }
 
 function PollBlock({ choices, itemId, reactions, myId, onReact }: { choices: string[]; itemId: string; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {
