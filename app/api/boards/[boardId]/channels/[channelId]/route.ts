@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteChannel, isAdminRequest, setChannelArchived, updateChannel } from "@/lib/db";
+import { deleteChannel, isAdminRequest, setChannelArchived, setChannelType, updateChannel } from "@/lib/db";
 import { isValidChannelSlug } from "@/lib/slug";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
   const { boardId: rawBoardId, channelId: rawChannelId } = await params;
-  const body = (await request.json()) as { name?: string; slug?: string; archived?: boolean };
+  const body = (await request.json()) as { name?: string; slug?: string; archived?: boolean; type?: "standard" | "submission" };
   const boardId = decodeURIComponent(rawBoardId);
   const channelId = decodeURIComponent(rawChannelId);
   if (typeof body.archived === "boolean") {
@@ -34,7 +34,12 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
     return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
   }
-  return NextResponse.json(result.channel);
+  const type = body.type === "submission" ? "submission" : body.type === "standard" ? "standard" : result.channel.type;
+  if (type !== result.channel.type) {
+    const typeResult = setChannelType(boardId, channelId, type);
+    if (!typeResult.ok) return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
+  }
+  return NextResponse.json({ ...result.channel, type });
 }
 
 export async function DELETE(_request: Request, { params }: RouteParams) {

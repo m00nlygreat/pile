@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { closestCenter, DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
@@ -18,8 +19,11 @@ const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6�
 const POLL_FENCE_RE = /(```poll\r?\n[\s\S]*?```)/;
 const PRESET_EMOJIS = ["👍", "❤️", "🔥", "😂", "👀", "✅", "💡", "🤔", "🎉", "😮", "🙏", "⭐"];
 const NAMES = ["느긋한 펭귄", "조용한 다람쥐", "성실한 두루미", "호기심 여우", "단단한 고래", "푸근한 사슴"];
+let adminSessionCache: boolean | undefined;
+let adminSessionRequest: Promise<boolean> | null = null;
 
 type Toast = { id: string; msg: string; Icon?: (p: { s?: number }) => ReactElement };
+type ItemContextState = { item: ItemRecord; x: number; y: number };
 type Peer = { name: string; color: string; x: number; docY: number };
 type TrysteroAction = { send: (...args: unknown[]) => void; onMessage?: unknown };
 type TrysteroRoom = {
@@ -333,12 +337,14 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const [items, setItems] = useState(initialData.items);
   const [reactions, setReactions] = useState(initialData.reactions);
   const [channel, setChannel] = useState(initialData.channels.find((item) => item.slug === initialChannelSlug)?.id ?? initialData.channels[0]?.id ?? "default");
-  const [admin, setAdmin] = useState(false);
+  const [admin, setAdmin] = useState(() => adminSessionCache ?? false);
   const [dragOver, setDragOver] = useState(false);
   const [newId, setNewId] = useState<string | null>(null);
   const [me, setMe, ensureMe] = useLocalUser(boardId);
   const [toasts, toast] = useToasts();
   const [showShare, setShowShare] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<ItemRecord | null>(null);
+  const [itemContext, setItemContext] = useState<ItemContextState | null>(null);
   const [shareUrl, setShareUrl] = useState("");
   const feedRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
@@ -369,13 +375,41 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     router.replace(channelPath(boardId, fallback));
   }, [boardId, channel, channels, router]);
   useEffect(() => {
+    if (!admin) {
+      setItemContext(null);
+      return;
+    }
+    const openItemMenu = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const card = target.closest<HTMLElement>("[data-item-id]");
+      const itemId = card?.dataset.itemId;
+      const item = itemId ? items.find((candidate) => candidate.id === itemId) : undefined;
+      if (!item) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setItemContext({ item, x: event.clientX, y: event.clientY });
+    };
+    document.addEventListener("contextmenu", openItemMenu, true);
+    return () => document.removeEventListener("contextmenu", openItemMenu, true);
+  }, [admin, items]);
+  useEffect(() => {
+    if (adminSessionCache !== undefined) {
+      setAdmin(adminSessionCache);
+      return;
+    }
     let cancelled = false;
-    fetch("/api/admin/session")
+    adminSessionRequest ??= fetch("/api/admin/session")
       .then((res) => (res.ok ? res.json() as Promise<{ admin?: boolean }> : null))
-      .then((data) => {
-        if (!cancelled && data) setAdmin(Boolean(data.admin));
-      })
-      .catch(() => undefined);
+      .then((data) => Boolean(data?.admin))
+      .catch(() => false)
+      .then((enabled) => {
+        adminSessionCache = enabled;
+        return enabled;
+      });
+    adminSessionRequest.then((enabled) => {
+      if (!cancelled) setAdmin(enabled);
+    });
     return () => {
       cancelled = true;
     };
@@ -505,35 +539,37 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       body: JSON.stringify({ enabled, password }),
     });
     if (!res.ok) {
+      adminSessionCache = false;
       setAdmin(false);
       toast("비밀번호가 올바르지 않아요", I.shield);
       return;
     }
+    adminSessionCache = enabled;
     setAdmin(enabled);
     toast(enabled ? "관리자 모드 · 모든 아이템 관리 가능" : "관리자 모드를 껐어요", I.shield);
   };
-  const addChannel = async (name: string, type: ChannelRecord["type"]) => {
+  const addChannel = async (name: string) => {
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, type }),
+      body: JSON.stringify({ name }),
     });
     if (!res.ok) return toast("관리자 권한이 필요해요", I.shield);
     const next = (await res.json()) as ChannelRecord;
     setChannels((prev) => [...prev, next]);
     setChannel(next.id);
     router.push(channelPath(boardId, next));
-    toast(`${type === "submission" ? "제출" : "일반"} 채널 #${name}을 만들었어요`, type === "submission" ? I.clip : I.hash);
+    toast(`#${name} 채널을 만들었어요`, I.hash);
   };
   const pickChannel = useCallback((next: ChannelRecord) => {
     setChannel(next.id);
     if (!next.archived) router.push(channelPath(boardId, next));
   }, [boardId, router]);
-  const editChannel = async (target: ChannelRecord, name: string, slug: string) => {
+  const editChannel = async (target: ChannelRecord, name: string, slug: string, type: ChannelRecord["type"]) => {
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, slug }),
+      body: JSON.stringify({ name, slug, type }),
     });
     if (!res.ok) {
       const payload = await res.json().catch(() => null) as { error?: string } | null;
@@ -620,6 +656,12 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     setItems((prev) => prev.filter((old) => old.id !== item.id));
     toast(item.type === "file" ? "파일과 함께 삭제했어요" : "삭제했어요", I.trash);
   };
+  const moveItem = (item: ItemRecord, destination: ChannelRecord) => {
+    setItems((prev) => prev.filter((old) => old.id !== item.id));
+    setReactions((prev) => Object.fromEntries(Object.entries(prev).filter(([itemId]) => itemId !== item.id)));
+    setMoveTarget(null);
+    toast(`#${destination.name} 채널로 옮겼어요`, I.hash);
+  };
   const copyItem = (item: ItemRecord) => {
     const text = item.type === "text" ? item.body ?? "" : item.type === "link" ? item.link?.url ?? "" : item.file?.name ?? "";
     navigator.clipboard?.writeText(text).catch(() => undefined);
@@ -673,6 +715,8 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     >
       <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} />
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
+      {itemContext && <ItemContextMenu state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} />}
+      {moveTarget && <MoveChannelModal channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
@@ -738,6 +782,111 @@ function UrlModal({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
+function ItemContextMenu({ state, onClose, onMove }: { state: ItemContextState; onClose: () => void; onMove: () => void }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState(() => ({
+    left: Math.max(8, Math.min(state.x, window.innerWidth - 228)),
+    top: Math.max(8, Math.min(state.y, window.innerHeight - 52)),
+  }));
+
+  useEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    const rect = menu.getBoundingClientRect();
+    setPosition({
+      left: Math.max(8, Math.min(state.x, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(state.y, window.innerHeight - rect.height - 8)),
+    });
+  }, [state.x, state.y]);
+
+  useEffect(() => {
+    const closeOnPointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) onClose();
+    };
+    const closeOnKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", closeOnPointer);
+    document.addEventListener("keydown", closeOnKey);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointer);
+      document.removeEventListener("keydown", closeOnKey);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  return (
+    <div ref={menuRef} className="item-context-menu" role="menu" aria-label="게시물 관리" style={position} onContextMenu={(event) => event.preventDefault()}>
+      <button role="menuitem" onClick={onMove}><I.hash s={15} /><span>다른 채널로 이동</span></button>
+    </div>
+  );
+}
+
+function MoveChannelModal({ channels, item, onClose, onMoved }: { channels: ChannelRecord[]; item: ItemRecord; onClose: () => void; onMoved: (item: ItemRecord, destination: ChannelRecord) => void }) {
+  const destinations = channels.filter((channel) => !channel.archived && channel.id !== item.channel);
+  const [selected, setSelected] = useState(destinations[0]?.id ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
+
+  const move = async () => {
+    if (!selected || saving) return;
+    setSaving(true);
+    setError("");
+    const res = await fetch(`/api/items/${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destinationChannelId: selected }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      setError(payload?.error ?? "게시물을 옮길 수 없습니다.");
+      setSaving(false);
+      return;
+    }
+    const destination = destinations.find((channel) => channel.id === selected);
+    if (destination) onMoved(item, destination);
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={() => { if (!saving) onClose(); }}>
+      <div className="modal-box move-channel-modal" role="dialog" aria-modal="true" aria-labelledby="move-channel-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="move-channel-head">
+          <span className="move-channel-icon"><I.hash s={18} /></span>
+          <span><strong id="move-channel-title">게시물을 다른 채널로 이동</strong><small>이동할 채널을 선택하세요.</small></span>
+        </div>
+        <div className="move-channel-list" role="radiogroup" aria-label="이동할 채널">
+          {destinations.map((channel) => (
+            <label className={`move-channel-option ${selected === channel.id ? "selected" : ""}`} key={channel.id}>
+              <input type="radio" name="destination-channel" value={channel.id} checked={selected === channel.id} onChange={() => setSelected(channel.id)} />
+              <span className="move-channel-mark" aria-hidden="true">{channel.type === "submission" ? <I.clip s={15} /> : <I.hash s={15} />}</span>
+              <span><strong>{channel.name}</strong><small>/{channel.slug}</small></span>
+            </label>
+          ))}
+          {!destinations.length && <div className="move-channel-empty">이동할 수 있는 다른 채널이 없습니다.</div>}
+        </div>
+        {error && <p className="move-channel-error" role="alert">{error}</p>}
+        <div className="modal-actions move-channel-actions">
+          <button className="btn-ghost" onClick={onClose} disabled={saving}>취소</button>
+          <button className="btn-pri" onClick={move} disabled={!selected || saving}>{saving ? "이동 중…" : "이동"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, onRename, onShare }: { boardId: string; shareUrl: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onShare: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.display);
@@ -745,7 +894,7 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
   return (
     <header className="topbar">
       <div className="tb-left">
-        <span className="logo"><span className="logo-mark"><span /><span /><span /></span>pile</span>
+        <Link className="logo" href="/" aria-label="pile 홈으로 이동"><span className="logo-mark"><span /><span /><span /></span>pile</Link>
         <button className="board-url" onClick={onShare} title="보드 URL 공유"><span className="bu-host">{host ? `${host}/` : ""}</span><span className="bu-id">{boardId}</span><I.share s={13} /></button>
       </div>
       <div className="tb-right">
@@ -776,15 +925,14 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   counts: Record<string, number>;
   admin: boolean;
   onPick: (channel: ChannelRecord) => void;
-  onAdd: (name: string, type: ChannelRecord["type"]) => void;
-  onEdit: (channel: ChannelRecord, name: string, slug: string) => Promise<string | null>;
+  onAdd: (name: string) => void;
+  onEdit: (channel: ChannelRecord, name: string, slug: string, type: ChannelRecord["type"]) => Promise<string | null>;
   onArchive: (channel: ChannelRecord, archived: boolean) => void;
   onReorder: (channels: ChannelRecord[]) => void;
   onDelete: (channel: ChannelRecord) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [val, setVal] = useState("");
-  const [type, setType] = useState<ChannelRecord["type"]>("standard");
   const [menu, setMenu] = useState<ChannelMenuState | null>(null);
   const [editing, setEditing] = useState<ChannelRecord | null>(null);
   const [openedArchivedId, setOpenedArchivedId] = useState<string | null>(null);
@@ -824,9 +972,8 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   };
   const create = () => {
     if (!val.trim()) return;
-    onAdd(val.trim(), type);
+    onAdd(val.trim());
     setVal("");
-    setType("standard");
     setAdding(false);
   };
   const openMenu = (channel: ChannelRecord, x: number, y: number) => {
@@ -834,7 +981,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
     setMenu({
       channel,
       x: Math.max(8, Math.min(x, window.innerWidth - 184)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 146)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 188)),
     });
   };
   const cancelLongPress = () => {
@@ -935,12 +1082,8 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
           <span className="ch-add-edit">
             <input autoFocus value={val} placeholder="채널 이름" onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => {
               if (e.key === "Enter") create();
-              if (e.key === "Escape") { setVal(""); setType("standard"); setAdding(false); }
+              if (e.key === "Escape") { setVal(""); setAdding(false); }
             }} />
-            <span className="ch-type-select" aria-label="채널 유형">
-              <button className={type === "standard" ? "on" : ""} onClick={() => setType("standard")} type="button"><I.hash s={12} />일반</button>
-              <button className={type === "submission" ? "on" : ""} onClick={() => setType("submission")} type="button"><I.clip s={12} />제출</button>
-            </span>
             <button className="ch-create" onClick={create} disabled={!val.trim()} title="채널 만들기"><I.check s={13} /></button>
           </span>
         ) : (
@@ -1053,10 +1196,11 @@ function SortableChannelChip({ channel, current, count, admin, suppressClick, on
 function ChannelEditModal({ channel, onClose, onSubmit }: {
   channel: ChannelRecord;
   onClose: () => void;
-  onSubmit: (channel: ChannelRecord, name: string, slug: string) => Promise<string | null>;
+  onSubmit: (channel: ChannelRecord, name: string, slug: string, type: ChannelRecord["type"]) => Promise<string | null>;
 }) {
   const [name, setName] = useState(channel.name);
   const [slug, setSlug] = useState(channel.slug);
+  const [type, setType] = useState<ChannelRecord["type"]>(channel.type);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const nameId = useId();
@@ -1065,7 +1209,7 @@ function ChannelEditModal({ channel, onClose, onSubmit }: {
     if (!name.trim() || !slug.trim() || saving) return;
     setSaving(true);
     setError("");
-    const nextError = await onSubmit(channel, name.trim(), slug.trim());
+    const nextError = await onSubmit(channel, name.trim(), slug.trim(), type);
     setSaving(false);
     if (nextError) setError(nextError);
     else onClose();
@@ -1087,7 +1231,7 @@ function ChannelEditModal({ channel, onClose, onSubmit }: {
       >
         <div className="channel-edit-head">
           <span className="channel-edit-icon"><I.edit s={18} /></span>
-          <div><h2 id={`${nameId}-title`}>채널 수정</h2><p>채널 이름과 주소용 slug를 변경합니다.</p></div>
+          <div><h2 id={`${nameId}-title`}>채널 수정</h2><p>채널 정보와 게시물 보기 방식을 변경합니다.</p></div>
         </div>
         <label className="channel-edit-field" htmlFor={nameId}>
           <span>채널명</span>
@@ -1098,6 +1242,13 @@ function ChannelEditModal({ channel, onClose, onSubmit }: {
           <div className="channel-slug-input"><span>/</span><input id={slugId} value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase())} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={80} /></div>
           <small>영문 소문자, 숫자, 하이픈만 사용할 수 있습니다.{channel.id === "default" ? " 기본 채널의 대표 주소는 보드 루트로 유지됩니다." : ""}</small>
         </label>
+        <fieldset className="channel-view-field">
+          <legend>보기 방식</legend>
+          <div className="channel-view-select">
+            <button type="button" className={type === "standard" ? "on" : ""} aria-pressed={type === "standard"} onClick={() => setType("standard")}><I.hash s={15} /><span><strong>일반 보기</strong><small>게시물을 시간순으로 표시</small></span></button>
+            <button type="button" className={type === "submission" ? "on" : ""} aria-pressed={type === "submission"} onClick={() => setType("submission")}><I.clip s={15} /><span><strong>제출 보기</strong><small>참여자별 제출물로 표시</small></span></button>
+          </div>
+        </fieldset>
         {error && <p className="channel-edit-error" role="alert">{error}</p>}
         <div className="modal-actions channel-edit-actions">
           <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>취소</button>
@@ -1274,9 +1425,9 @@ function SubmissionModal({ user, items, me, admin, onClose, onDelete, onCopy, on
       <div className="submission-overlay" role="dialog" aria-modal="true" aria-label={`${user.display || user.nick}의 제출물`} onClick={(event) => event.stopPropagation()}>
         <header className="submission-overlay-head"><span className="submission-overlay-user"><Avatar user={user} s={32} /><span><strong>{user.display || user.nick}</strong><small>제출물</small></span></span><span className="submission-overlay-count">{safeIndex + 1} / {items.length}</span><button className="submission-overlay-close" onClick={onClose} aria-label="닫기">×</button></header>
         <div className="submission-stage">
-          {items.length > 1 && <button className="submission-nav prev" onClick={() => go(-1)} aria-label="이전 제출물">‹</button>}
+          {items.length > 1 && <button className="submission-nav prev" onClick={() => go(-1)} aria-label="이전 제출물"><I.chevronDown s={22} /></button>}
           <div className="submission-item"><ItemCard item={item} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[item.id] ?? {}} dense={dense} isPinned={item.pinned} onTogglePin={onTogglePin} /></div>
-          {items.length > 1 && <button className="submission-nav next" onClick={() => go(1)} aria-label="다음 제출물">›</button>}
+          {items.length > 1 && <button className="submission-nav next" onClick={() => go(1)} aria-label="다음 제출물"><I.chevronDown s={22} /></button>}
         </div>
       </div>
     </div>
@@ -1295,7 +1446,7 @@ function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense
   const canDelete = admin || item.user.id === me.id;
   const mine = item.user.id === me.id;
   return (
-    <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type}>
+    <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type} data-item-id={item.id} title={admin ? "우클릭하여 다른 채널로 이동" : undefined}>
       <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">관리자</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
       <div className="card-body">{item.type === "text" && <TextBody item={item} reactions={reactions} myId={me.id} onReact={onReact} />}{item.type === "link" && item.link && <LinkBody link={item.link} />}{item.type === "file" && item.file && <FileBody file={item.file} />}</div>
       <Reactions itemId={item.id} reactions={reactions} myId={me.id} onReact={onReact} />

@@ -9,11 +9,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
   const { boardId } = await params;
-  const body = (await request.json()) as { name?: string; type?: "standard" | "submission" };
+  const body = (await request.json()) as { name?: string };
   const name = body.name?.trim();
   if (!name) return NextResponse.json({ error: "채널 이름이 필요합니다." }, { status: 400 });
-  const type = body.type === "submission" ? "submission" : "standard";
-  return NextResponse.json(createChannel(decodeURIComponent(boardId), name, type));
+  return NextResponse.json(createChannel(decodeURIComponent(boardId), name, "standard"));
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ boardId: string }> }) {

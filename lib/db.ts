@@ -328,6 +328,15 @@ export function updateChannel(boardId: string, channelId: string, name: string, 
   };
 }
 
+export function setChannelType(boardId: string, channelId: string, type: ChannelRecord["type"]) {
+  ensureBoard(boardId);
+  const result = getDb()
+    .prepare("UPDATE channels SET type = ? WHERE board_id = ? AND id = ?")
+    .run(type, boardId, channelId);
+  if (result.changes === 0) return { ok: false as const, reason: "not-found" as const };
+  return { ok: true as const, type };
+}
+
 export function setChannelArchived(boardId: string, channelId: string, archived: boolean) {
   ensureBoard(boardId);
   const conn = getDb();
@@ -436,6 +445,27 @@ export function createItem(boardId: string, input: Omit<ItemRecord, "id" | "boar
 
 export function setPinned(itemId: string, pinned: boolean) {
   getDb().prepare("UPDATE items SET pinned = ? WHERE id = ?").run(pinned ? 1 : 0, itemId);
+}
+
+export function moveItemToChannel(itemId: string, destinationChannelId: string) {
+  const conn = getDb();
+  const item = conn
+    .prepare("SELECT board_id as boardId, channel FROM items WHERE id = ?")
+    .get(itemId) as { boardId: string; channel: string } | undefined;
+  if (!item) return { ok: false as const, reason: "not-found" as const };
+  if (item.channel === destinationChannelId) return { ok: false as const, reason: "same-channel" as const };
+
+  const destination = conn
+    .prepare("SELECT id, slug, name FROM channels WHERE board_id = ? AND id = ? AND archived = 0")
+    .get(item.boardId, destinationChannelId) as { id: string; slug: string; name: string } | undefined;
+  if (!destination) return { ok: false as const, reason: "channel-not-found" as const };
+
+  conn.prepare("UPDATE items SET channel = ?, pinned = 0 WHERE id = ?").run(destination.id, itemId);
+
+  return {
+    ok: true as const,
+    destination: { channelId: String(destination.id), channelSlug: String(destination.slug), channelName: String(destination.name) },
+  };
 }
 
 export function deleteItem(itemId: string, userId: string, admin: boolean) {
