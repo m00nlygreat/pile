@@ -1093,7 +1093,10 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
       {archivedChannels.length > 0 && (
         <details ref={archiveDetailsRef} className="archive-dropdown">
           <summary aria-label={`아카이브된 채널 ${archivedChannels.length}개`}>
-            <I.archive s={14} />아카이브 <span>{archivedChannels.length}</span><I.chevronDown s={12} />
+            <I.archive s={14} />
+            <span className="archive-label">아카이브</span>
+            <span className="archive-count">{archivedChannels.length}</span>
+            <I.chevronDown className="archive-chevron" s={12} />
           </summary>
           <div className="archive-dropdown-menu" role="menu">
             {archivedChannels.map((channel) => (
