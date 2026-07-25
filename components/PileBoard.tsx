@@ -918,6 +918,13 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
 }
 
 type ChannelMenuState = { channel: ChannelRecord; x: number; y: number };
+type ChannelTouchStart = { boardId: string; channelId: string; pointerId: number; x: number; y: number };
+type ChannelTouchTap = { boardId: string; channelId: string; at: number; x: number; y: number };
+
+const CHANNEL_DOUBLE_TAP_MS = 360;
+const CHANNEL_TAP_MOVE_PX = 10;
+const CHANNEL_DOUBLE_TAP_DISTANCE_PX = 28;
+let lastChannelTouchTap: ChannelTouchTap | null = null;
 
 function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onArchive, onReorder, onDelete }: {
   channels: ChannelRecord[];
@@ -937,9 +944,8 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   const [editing, setEditing] = useState<ChannelRecord | null>(null);
   const [openedArchivedId, setOpenedArchivedId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const longPressTimer = useRef(0);
   const suppressClickTimer = useRef(0);
-  const longPressStart = useRef({ x: 0, y: 0 });
+  const touchTapStart = useRef<ChannelTouchStart | null>(null);
   const suppressClick = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const archiveDetailsRef = useRef<HTMLDetailsElement>(null);
@@ -953,6 +959,8 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   const normalChannels = channels.filter((channel) => !channel.archived).sort((a, b) => b.position - a.position);
   const activeChannel = activeId ? normalChannels.find((channel) => channel.id === activeId) : null;
   const handleDragStart = ({ active }: DragStartEvent) => {
+    touchTapStart.current = null;
+    lastChannelTouchTap = null;
     setActiveId(String(active.id));
     suppressClick.current = true;
   };
@@ -984,9 +992,68 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
       y: Math.max(8, Math.min(y, window.innerHeight - 188)),
     });
   };
-  const cancelLongPress = () => {
-    window.clearTimeout(longPressTimer.current);
-    longPressTimer.current = 0;
+  const startTouchTap = (channel: ChannelRecord, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!admin || event.pointerType !== "touch" || !event.isPrimary) return;
+    touchTapStart.current = {
+      boardId: channel.boardId,
+      channelId: channel.id,
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+  };
+  const moveTouchTap = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = touchTapStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= CHANNEL_TAP_MOVE_PX) return;
+    touchTapStart.current = null;
+    lastChannelTouchTap = null;
+  };
+  const cancelTouchTap = () => {
+    touchTapStart.current = null;
+    lastChannelTouchTap = null;
+  };
+  const finishTouchTap = (channel: ChannelRecord, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!admin || event.pointerType !== "touch" || !event.isPrimary) return;
+    const start = touchTapStart.current;
+    touchTapStart.current = null;
+    if (
+      !start
+      || start.pointerId !== event.pointerId
+      || start.boardId !== channel.boardId
+      || start.channelId !== channel.id
+      || Math.hypot(event.clientX - start.x, event.clientY - start.y) > CHANNEL_TAP_MOVE_PX
+      || suppressClick.current
+    ) {
+      lastChannelTouchTap = null;
+      return;
+    }
+
+    const now = Date.now();
+    const previous = lastChannelTouchTap;
+    const isDoubleTap = previous
+      && previous.boardId === channel.boardId
+      && previous.channelId === channel.id
+      && now - previous.at <= CHANNEL_DOUBLE_TAP_MS
+      && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= CHANNEL_DOUBLE_TAP_DISTANCE_PX;
+
+    if (!isDoubleTap) {
+      lastChannelTouchTap = {
+        boardId: channel.boardId,
+        channelId: channel.id,
+        at: now,
+        x: event.clientX,
+        y: event.clientY,
+      };
+      return;
+    }
+
+    lastChannelTouchTap = null;
+    event.preventDefault();
+    window.clearTimeout(suppressClickTimer.current);
+    suppressClick.current = true;
+    suppressClickTimer.current = window.setTimeout(() => { suppressClick.current = false; }, 0);
+    openMenu(channel, event.clientX, event.clientY);
   };
   useEffect(() => {
     if (!menu) return;
@@ -1008,7 +1075,6 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
     };
   }, [menu]);
   useEffect(() => () => {
-    window.clearTimeout(longPressTimer.current);
     window.clearTimeout(suppressClickTimer.current);
   }, []);
   return (
@@ -1033,6 +1099,10 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
                 suppressClick={suppressClick}
                 onPick={() => { setOpenedArchivedId(null); onPick(channel); }}
                 onOpenMenu={(x, y) => openMenu(channel, x, y)}
+                onTouchTapStart={(event) => startTouchTap(channel, event)}
+                onTouchTapMove={moveTouchTap}
+                onTouchTapEnd={(event) => finishTouchTap(channel, event)}
+                onTouchTapCancel={cancelTouchTap}
               />
             ))}
           </SortableContext>
@@ -1047,6 +1117,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
               onContextMenu={(event) => {
                 if (!admin) return;
                 event.preventDefault();
+                if ((event.nativeEvent as PointerEvent).pointerType === "touch") return;
                 openMenu(channel, event.clientX, event.clientY);
               }}
               onKeyDown={(event) => {
@@ -1056,22 +1127,12 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
                   openMenu(channel, rect.left, rect.bottom + 4);
                 }
               }}
-              onPointerDown={(event) => {
-                if (!admin || event.pointerType === "mouse") return;
-                cancelLongPress();
-                longPressStart.current = { x: event.clientX, y: event.clientY };
-                longPressTimer.current = window.setTimeout(() => {
-                  suppressClick.current = true;
-                  openMenu(channel, event.clientX, event.clientY);
-                }, 550);
-              }}
-              onPointerMove={(event) => {
-                if (Math.hypot(event.clientX - longPressStart.current.x, event.clientY - longPressStart.current.y) > 8) cancelLongPress();
-              }}
-              onPointerUp={cancelLongPress}
-              onPointerCancel={cancelLongPress}
+              onPointerDown={(event) => startTouchTap(channel, event)}
+              onPointerMove={moveTouchTap}
+              onPointerUp={(event) => finishTouchTap(channel, event)}
+              onPointerCancel={cancelTouchTap}
               aria-haspopup={admin ? "menu" : undefined}
-              title={admin ? "우클릭하거나 길게 눌러 채널 관리" : undefined}
+              title={admin ? "두 번 탭하거나 우클릭하여 채널 관리" : undefined}
             >
               {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
               {channel.name}
@@ -1144,7 +1205,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   );
 }
 
-function SortableChannelChip({ channel, current, count, admin, suppressClick, onPick, onOpenMenu }: {
+function SortableChannelChip({ channel, current, count, admin, suppressClick, onPick, onOpenMenu, onTouchTapStart, onTouchTapMove, onTouchTapEnd, onTouchTapCancel }: {
   channel: ChannelRecord;
   current: string;
   count: number;
@@ -1152,6 +1213,10 @@ function SortableChannelChip({ channel, current, count, admin, suppressClick, on
   suppressClick: React.MutableRefObject<boolean>;
   onPick: () => void;
   onOpenMenu: (x: number, y: number) => void;
+  onTouchTapStart: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onTouchTapMove: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onTouchTapEnd: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onTouchTapCancel: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: channel.id,
@@ -1173,6 +1238,10 @@ function SortableChannelChip({ channel, current, count, admin, suppressClick, on
         if (suppressClick.current) return;
         onPick();
       }}
+      onPointerDown={onTouchTapStart}
+      onPointerMove={onTouchTapMove}
+      onPointerUp={onTouchTapEnd}
+      onPointerCancel={onTouchTapCancel}
       onContextMenu={(event) => {
         if (!admin) return;
         event.preventDefault();
@@ -1187,7 +1256,7 @@ function SortableChannelChip({ channel, current, count, admin, suppressClick, on
         }
       }}
       aria-haspopup={admin ? "menu" : undefined}
-      title={admin ? "드래그하여 순서 변경 · 우클릭하여 관리" : undefined}
+      title={admin ? "길게 눌러 순서 변경 · 두 번 탭하거나 우클릭하여 관리" : undefined}
     >
       {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
       {channel.name}
