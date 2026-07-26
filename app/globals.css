@@ -195,7 +195,7 @@ kbd {
   position: relative;
   z-index: 20;
 }
-.ch-scroll { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; gap: 6px; overflow-x: auto; padding: 9px 8px; scrollbar-width: none; }
+.ch-scroll { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; gap: 6px; overflow-x: auto; overscroll-behavior-inline: contain; touch-action: pan-x; -webkit-overflow-scrolling: touch; padding: 9px 8px; scrollbar-width: none; }
 .ch-scroll::-webkit-scrollbar { display: none; }
 .chip {
   display: inline-flex;
@@ -212,7 +212,7 @@ kbd {
 }
 .chip svg { opacity: .45; }
 .chip:hover { background: var(--surface); color: var(--ink); }
-.chip.is-reorderable { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; will-change: transform; }
+.chip.is-reorderable { cursor: grab; touch-action: pan-x; user-select: none; -webkit-user-select: none; will-change: transform; }
 .chip.is-reorderable:active { cursor: grabbing; }
 .channel-drag-ghost { margin: 0; pointer-events: none; cursor: grabbing; transform: scale(1.035); box-shadow: 0 12px 28px -10px oklch(0.3 0.04 60 / .42); will-change: transform; }
 .chip.on { background: var(--surface); color: var(--ink); border-color: var(--hair-2); box-shadow: var(--shadow-card); font-weight: 600; }
