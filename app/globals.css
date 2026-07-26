@@ -200,6 +200,7 @@ kbd {
 .chip {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 5px;
   white-space: nowrap;
   font-size: 13.5px;
@@ -212,8 +213,9 @@ kbd {
 }
 .chip svg { opacity: .45; }
 .chip:hover { background: var(--surface); color: var(--ink); }
-.chip.is-reorderable { cursor: grab; touch-action: pan-x; user-select: none; -webkit-user-select: none; will-change: transform; }
-.chip.is-reorderable:active { cursor: grabbing; }
+/* The row owns horizontal panning; a pill only owns the gesture after TouchSensor's hold delay. */
+.chip.is-reorderable { cursor: grab; touch-action: auto; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; will-change: transform; }
+.chip.is-reorderable.is-dragging { cursor: grabbing; }
 .channel-drag-ghost { margin: 0; pointer-events: none; cursor: grabbing; transform: scale(1.035); box-shadow: 0 12px 28px -10px oklch(0.3 0.04 60 / .42); will-change: transform; }
 .chip.on { background: var(--surface); color: var(--ink); border-color: var(--hair-2); box-shadow: var(--shadow-card); font-weight: 600; }
 .chip.on svg { opacity: .75; color: var(--accent); }

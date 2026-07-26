@@ -924,6 +924,8 @@ type ChannelTouchTap = { boardId: string; channelId: string; at: number; x: numb
 const CHANNEL_DOUBLE_TAP_MS = 360;
 const CHANNEL_TAP_MOVE_PX = 10;
 const CHANNEL_DOUBLE_TAP_DISTANCE_PX = 28;
+const CHANNEL_REORDER_HOLD_MS = 420;
+const CHANNEL_REORDER_TOLERANCE_PX = 8;
 let lastChannelTouchTap: ChannelTouchTap | null = null;
 
 function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onArchive, onReorder, onDelete }: {
@@ -949,9 +951,16 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   const suppressClick = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const archiveDetailsRef = useRef<HTMLDetailsElement>(null);
+  // TouchSensor leaves movement native while pending, so swipes scroll the row.
+  // Reordering starts only after a stationary long press clears this constraint.
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 280, tolerance: 6 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: CHANNEL_REORDER_HOLD_MS,
+        tolerance: CHANNEL_REORDER_TOLERANCE_PX,
+      },
+    }),
   );
   const archivedChannels = channels
     .filter((channel) => channel.archived)
@@ -1228,7 +1237,7 @@ function SortableChannelChip({ channel, current, count, admin, suppressClick, on
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""} ${admin ? "is-reorderable" : ""}`}
+      className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""} ${admin ? "is-reorderable" : ""} ${isDragging ? "is-dragging" : ""}`}
       style={{
         transform: CSS.Transform.toString(transform ? { ...transform, y: 0 } : null),
         transition,
@@ -1256,7 +1265,7 @@ function SortableChannelChip({ channel, current, count, admin, suppressClick, on
         }
       }}
       aria-haspopup={admin ? "menu" : undefined}
-      title={admin ? "길게 눌러 순서 변경 · 두 번 탭하거나 우클릭하여 관리" : undefined}
+      title={admin ? "가로 스와이프하여 채널 이동 · 길게 눌러 순서 변경 · 두 번 탭하거나 우클릭하여 관리" : undefined}
     >
       {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
       {channel.name}
