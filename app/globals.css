@@ -524,8 +524,11 @@ button.submission-person.submitted:hover { border-color: var(--accent); backgrou
 .md a { color: var(--accent-ink); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--accent) 40%, transparent); text-underline-offset: 2px; }
 .md-code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); border: 1px solid var(--hair); border-radius: 5px; padding: .08em .35em; }
 .md-pre { background: oklch(0.27 0.012 62); border-radius: 10px; overflow: hidden; margin: .7em 0; font-size: 12.8px; }
-.md-pre-bar { display: flex; padding: 6px 12px; background: oklch(0.23 0.012 62); }
+.md-pre-bar { display: flex; align-items: center; min-height: 32px; padding: 4px 6px 4px 12px; background: oklch(0.23 0.012 62); }
 .md-pre-bar span { font-family: var(--mono); font-size: 11px; color: oklch(0.7 0.02 80); }
+.md-copy { margin-left: auto; padding: 3px 7px; border-radius: 5px; font-family: var(--mono); font-size: 10.5px; line-height: 1.4; color: oklch(0.74 0.02 80); transition: color .12s, background .12s; }
+.md-copy:hover, .md-copy:focus-visible { color: oklch(0.94 0.015 85); background: oklch(1 0 0 / .1); }
+.md-copy.is-copied { color: oklch(0.82 0.11 145); }
 .md-pre code { display: block; font-family: var(--mono); padding: 12px 14px; color: oklch(0.9 0.015 85); white-space: pre-wrap; word-break: break-word; overflow-x: auto; line-height: 1.6; }
 .md-pre .hljs-keyword, .md-pre .hljs-selector-tag, .md-pre .hljs-literal { color: oklch(0.78 0.12 305); }
 .md-pre .hljs-string, .md-pre .hljs-regexp, .md-pre .hljs-addition { color: oklch(0.82 0.11 145); }

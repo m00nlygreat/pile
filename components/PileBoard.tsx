@@ -1637,9 +1637,32 @@ function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense
 function TextBody({ item, reactions, myId, onReact }: { item: ItemRecord; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {
   const body = item.body ?? "";
   const parts = body.split(POLL_FENCE_RE);
-  if (parts.length === 1) return <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />;
+  if (parts.length === 1) return <MarkdownPreview source={body} />;
   const choices = parsePollChoices(parts[1] ?? "");
-  return <div className="md">{parts[0]?.trim() && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(parts[0]) }} />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(parts[2]) }} />}</div>;
+  return <div className="md">{parts[0]?.trim() && <MarkdownPreview source={parts[0]} nested />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <MarkdownPreview source={parts[2]} nested />}</div>;
+}
+
+function MarkdownPreview({ source, nested = false }: { source: string; nested?: boolean }) {
+  const copyCode = async (event: React.MouseEvent<HTMLDivElement>) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(".md-copy");
+    if (!button) return;
+    const code = button.closest(".md-pre")?.querySelector("code")?.textContent ?? "";
+    try {
+      await navigator.clipboard.writeText(code);
+      button.textContent = "복사됨";
+      button.classList.add("is-copied");
+      window.setTimeout(() => {
+        button.textContent = "복사";
+        button.classList.remove("is-copied");
+      }, 1600);
+    } catch {
+      button.textContent = "실패";
+      window.setTimeout(() => {
+        button.textContent = "복사";
+      }, 1600);
+    }
+  };
+  return <div className={nested ? undefined : "md"} onClick={copyCode} dangerouslySetInnerHTML={{ __html: renderMarkdown(source) }} />;
 }
 
 function parsePollChoices(fence: string) {

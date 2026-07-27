@@ -55,12 +55,28 @@ function markdownClasses() {
         const lang = Array.isArray(classes)
           ? classes.find((name) => typeof name === "string" && name.startsWith("language-"))?.replace(/^language-/, "")
           : undefined;
+        const barChildren: HastNode[] = [
+          { type: "element", tagName: "span", children: [{ type: "text", value: lang || "code" }] },
+        ];
+        if (lang?.toLowerCase() !== "poll") {
+          barChildren.push({
+            type: "element",
+            tagName: "button",
+            properties: {
+              className: ["md-copy"],
+              type: "button",
+              title: "코드 복사",
+              ariaLabel: "코드 복사",
+            },
+            children: [{ type: "text", value: "복사" }],
+          });
+        }
         node.children = [
           {
             type: "element",
             tagName: "div",
             properties: { className: ["md-pre-bar"] },
-            children: [{ type: "element", tagName: "span", children: [{ type: "text", value: lang || "code" }] }],
+            children: barChildren,
           },
           ...(node.children ?? []),
         ];
@@ -73,9 +89,11 @@ function markdownClasses() {
 
 const schema: SanitizeSchema = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "button"],
   attributes: {
     ...defaultSchema.attributes,
     a: [...(defaultSchema.attributes?.a ?? []), ["target"], ["rel"]],
+    button: [["className"], ["type", "button"], ["title"], ["ariaLabel"]],
     code: [...(defaultSchema.attributes?.code ?? []), ["className"]],
     div: [...(defaultSchema.attributes?.div ?? []), ["className"]],
     h1: [["className"]],
