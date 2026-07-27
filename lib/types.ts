@@ -5,6 +5,7 @@ export type UserRecord = {
   nick: string;
   display: string;
   admin: boolean;
+  lastSeenAt?: number;
 };
 
 export type ChannelRecord = {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createItem, defaultChannelExists } from "@/lib/db";
+import { createItem, defaultChannelExists, wasBoardUserRemoved } from "@/lib/db";
 import { deleteStoredFile, saveStoredFile } from "@/lib/file-storage";
 import type { UserRecord } from "@/lib/types";
 
@@ -33,6 +33,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
   }
   if (!user) {
     return NextResponse.json({ error: "작성자 정보가 필요합니다." }, { status: 400 });
+  }
+  if (wasBoardUserRemoved(boardId, user.id)) {
+    return NextResponse.json({ error: "다시 접속하면 새 참가자로 참여할 수 있습니다.", resetId: true }, { status: 409 });
   }
   if (!(file instanceof File) || !file.name || file.size > MAX_FILE_BYTES) {
     return NextResponse.json({ error: "파일이 없거나 20MB를 초과했습니다." }, { status: 400 });

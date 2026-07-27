@@ -66,6 +66,12 @@ function getDb() {
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (board_id, user_id)
       );
+      CREATE TABLE IF NOT EXISTS board_removed_users (
+        board_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        removed_at INTEGER NOT NULL,
+        PRIMARY KEY (board_id, user_id)
+      );
     `);
     migrateChannelSlugs(db);
     migrateChannelTypes(db);
@@ -215,14 +221,15 @@ export function getBoardPayload(boardId: string): BoardPayload {
     .prepare("SELECT * FROM items WHERE board_id = ? ORDER BY t DESC")
     .all(boardId) as Record<string, unknown>[];
   const userRows = conn
-    .prepare("SELECT user_id as userId, nick, display FROM board_users WHERE board_id = ?")
-    .all(boardId) as { userId: string; nick: string; display: string }[];
+    .prepare("SELECT user_id as userId, nick, display, updated_at as updatedAt FROM board_users WHERE board_id = ?")
+    .all(boardId) as { userId: string; nick: string; display: string; updatedAt: number }[];
   const users = new Map(userRows.map((user) => [String(user.userId), user]));
   const boardUsers: UserRecord[] = userRows.map((user) => ({
     id: String(user.userId),
     nick: String(user.nick),
     display: String(user.display),
     admin: false,
+    lastSeenAt: Number(user.updatedAt),
   }));
   const items: ItemRecord[] = itemRows.map((row) => {
     const fallbackUser = json<UserRecord>(row.user_json);
@@ -412,6 +419,39 @@ export function upsertBoardUser(boardId: string, user: UserRecord) {
     `)
     .run(boardId, user.id, nick, display, Date.now());
   return { ...user, nick, display, admin: false };
+}
+
+export function wasBoardUserRemoved(boardId: string, userId: string) {
+  return Boolean(getDb().prepare("SELECT 1 FROM board_removed_users WHERE board_id = ? AND user_id = ?").get(boardId, userId));
+}
+
+export function listBoardUsers(boardId: string) {
+  ensureBoard(boardId);
+  const rows = getDb()
+    .prepare("SELECT user_id as userId, nick, display, updated_at as updatedAt FROM board_users WHERE board_id = ? ORDER BY updated_at DESC")
+    .all(boardId) as { userId: string; nick: string; display: string; updatedAt: number }[];
+  return rows.map((user) => ({
+    id: String(user.userId),
+    nick: String(user.nick),
+    display: String(user.display),
+    admin: false,
+    lastSeenAt: Number(user.updatedAt),
+  }));
+}
+
+export function removeBoardUser(boardId: string, userId: string) {
+  ensureBoard(boardId);
+  const conn = getDb();
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    conn.prepare("INSERT INTO board_removed_users (board_id, user_id, removed_at) VALUES (?, ?, ?) ON CONFLICT(board_id, user_id) DO UPDATE SET removed_at = excluded.removed_at")
+      .run(boardId, userId, Date.now());
+    conn.prepare("DELETE FROM board_users WHERE board_id = ? AND user_id = ?").run(boardId, userId);
+    conn.exec("COMMIT");
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function createItem(boardId: string, input: Omit<ItemRecord, "id" | "boardId" | "pinned"> & { id?: string }) {

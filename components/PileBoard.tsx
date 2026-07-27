@@ -18,7 +18,19 @@ import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload,
 const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 const POLL_FENCE_RE = /(```poll\r?\n[\s\S]*?```)/;
 const PRESET_EMOJIS = ["👍", "❤️", "🔥", "😂", "👀", "✅", "💡", "🤔", "🎉", "😮", "🙏", "⭐"];
-const NAMES = ["느긋한 펭귄", "조용한 다람쥐", "성실한 두루미", "호기심 여우", "단단한 고래", "푸근한 사슴"];
+const NAME_ADJECTIVES = [
+  "느긋한", "조용한", "성실한", "호기심 많은", "단단한", "푸근한", "다정한", "용감한", "명랑한", "재빠른",
+  "차분한", "반짝이는", "엉뚱한", "씩씩한", "수줍은", "영리한", "포근한", "상냥한", "든든한", "유쾌한",
+  "꼼꼼한", "자유로운", "기운찬", "재치 있는", "평화로운", "활기찬", "낭만적인", "사려 깊은", "부지런한", "꿈꾸는",
+  "새벽을 걷는", "별을 세는", "바람을 타는", "구름을 닮은", "햇살을 품은", "노래하는", "춤추는", "여행하는", "책 읽는", "꽃을 가꾸는",
+];
+const NAME_NOUNS = [
+  "펭귄", "다람쥐", "두루미", "여우", "고래", "사슴", "수달", "해달", "알파카", "카피바라",
+  "판다", "쿼카", "코알라", "미어캣", "라쿤", "토끼", "고슴도치", "부엉이", "참새", "제비",
+  "돌고래", "바다표범", "북극곰", "기린", "코끼리", "치타", "표범", "늑대", "햄스터", "친칠라",
+  "오소리", "비버", "청설모", "나무늘보", "홍학", "앵무새", "까치", "수리부엉이", "해마", "문어",
+  "복어", "가오리", "거북이", "도롱뇽", "개구리", "나비", "반딧불이", "꿀벌", "사막여우", "눈표범",
+];
 let adminSessionCache: boolean | undefined;
 let adminSessionRequest: Promise<boolean> | null = null;
 
@@ -90,7 +102,7 @@ function avatarTone(name: string) {
 }
 
 function initials(name: string) {
-  return name.replace(/^(조용한|느긋한|성실한|호기심|졸린|날쌘|푸근한|단단한)\s*/, "").slice(0, 1);
+  return name.trim().split(/\s+/).at(-1)?.slice(0, 1) || "?";
 }
 
 function dateKey(ts: number) {
@@ -121,15 +133,17 @@ function useToasts() {
 }
 
 function saveBoardUser(boardId: string, user: UserRecord) {
-  fetch(`/api/boards/${encodeURIComponent(boardId)}/users`, {
+  return fetch(`/api/boards/${encodeURIComponent(boardId)}/users`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(user),
-  }).catch(() => undefined);
+  });
 }
 
 function createLocalUser() {
-  const name = NAMES[Math.floor(Math.random() * NAMES.length)];
+  const adjective = NAME_ADJECTIVES[Math.floor(Math.random() * NAME_ADJECTIVES.length)];
+  const noun = NAME_NOUNS[Math.floor(Math.random() * NAME_NOUNS.length)];
+  const name = `${adjective} ${noun}`;
   return { id: uid("me"), nick: name, display: name, admin: false };
 }
 
@@ -142,14 +156,20 @@ function useLocalUser(boardId: string) {
     const next = { ...user, admin: false };
     localStorage.setItem(key, JSON.stringify(next));
     setMe(next);
-    saveBoardUser(boardId, next);
+    saveBoardUser(boardId, next).then((res) => {
+      if (res.status !== 409) return;
+      const fresh = createLocalUser();
+      localStorage.setItem(key, JSON.stringify(fresh));
+      setMe(fresh);
+      return saveBoardUser(boardId, fresh);
+    }).catch(() => undefined);
   }, [boardId]);
   const update = useCallback((next: UserRecord) => {
     const key = `pile:user:${boardId}`;
     const user = { ...next, admin: false };
     localStorage.setItem(key, JSON.stringify(user));
     setMe(user);
-    saveBoardUser(boardId, user);
+    saveBoardUser(boardId, user).catch(() => undefined);
   }, [boardId]);
   const ensure = useCallback(() => {
     if (me) return me;
@@ -343,6 +363,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const [me, setMe, ensureMe] = useLocalUser(boardId);
   const [toasts, toast] = useToasts();
   const [showShare, setShowShare] = useState(false);
+  const [showParticipants, setShowParticipants] = useState(false);
   const [moveTarget, setMoveTarget] = useState<ItemRecord | null>(null);
   const [itemContext, setItemContext] = useState<ItemContextState | null>(null);
   const [shareUrl, setShareUrl] = useState("");
@@ -713,8 +734,9 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         }
       }}
     >
-      <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} />
+      <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} onShowParticipants={() => setShowParticipants(true)} />
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
+      {showParticipants && admin && <ParticipantsModal boardId={boardId} me={me2} onClose={() => setShowParticipants(false)} onKicked={(userId) => setParticipants((current) => current.filter((user) => user.id !== userId))} />}
       {itemContext && <ItemContextMenu state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} />}
       {moveTarget && <MoveChannelModal channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
@@ -777,6 +799,85 @@ function UrlModal({ url, onClose }: { url: string; onClose: () => void }) {
           <button className="btn-pri" onClick={copy}><I.copy s={14} />{copied ? "복사됨!" : "주소 복사"}</button>
           <button className="btn-ghost" onClick={onClose}>닫기</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ParticipantsModal({ boardId, me, onClose, onKicked }: { boardId: string; me: UserRecord; onClose: () => void; onKicked: (userId: string) => void }) {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/boards/${encodeURIComponent(boardId)}/users`, { cache: "no-store", signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("참가자 목록을 불러올 수 없습니다.");
+        return res.json() as Promise<{ users: UserRecord[] }>;
+      })
+      .then((payload) => setUsers(payload.users.sort((a, b) => (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0))))
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "참가자 목록을 불러올 수 없습니다.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [boardId]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !removing) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, removing]);
+
+  const kick = async (user: UserRecord) => {
+    if (user.id === me.id || removing || !window.confirm(`${user.display || user.nick} 님을 이 보드에서 추방할까요?`)) return;
+    setRemoving(user.id);
+    setError("");
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/users`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id }),
+    });
+    if (res.ok) {
+      setUsers((current) => current.filter((candidate) => candidate.id !== user.id));
+      onKicked(user.id);
+    } else {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      setError(payload?.error ?? "참가자를 추방할 수 없습니다.");
+    }
+    setRemoving(null);
+  };
+
+  const lastSeen = (time?: number) => {
+    if (!time) return "참여 기록 없음";
+    return new Date(time).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={() => { if (!removing) onClose(); }}>
+      <div className="modal-box participants-modal" role="dialog" aria-modal="true" aria-labelledby="participants-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="participants-head">
+          <span><strong id="participants-title">보드 참가자</strong><small>최근 참여 순 · {users.length}명</small></span>
+          <button className="participants-close" onClick={onClose} aria-label="닫기">×</button>
+        </div>
+        <div className="participants-list">
+          {loading && <p className="participants-state">참가자를 불러오는 중…</p>}
+          {!loading && users.map((user) => (
+            <div className="participant-row" key={user.id}>
+              <Avatar user={user} s={36} />
+              <span className="participant-info"><strong>{user.display || user.nick}{user.id === me.id && <em>나</em>}</strong><small>최근 참여 {lastSeen(user.lastSeenAt)}</small></span>
+              <button className="participant-kick" disabled={user.id === me.id || removing === user.id} onClick={() => void kick(user)}>{removing === user.id ? "추방 중…" : "추방"}</button>
+            </div>
+          ))}
+          {!loading && !users.length && !error && <p className="participants-state">기록된 참가자가 없습니다.</p>}
+        </div>
+        {error && <p className="participants-error" role="alert">{error}</p>}
       </div>
     </div>
   );
@@ -887,7 +988,7 @@ function MoveChannelModal({ channels, item, onClose, onMoved }: { channels: Chan
   );
 }
 
-function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, onRename, onShare }: { boardId: string; shareUrl: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onShare: () => void }) {
+function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, onRename, onShare, onShowParticipants }: { boardId: string; shareUrl: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onShare: () => void; onShowParticipants: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.display);
   const host = shareUrl ? new URL(shareUrl).host : "";
@@ -899,7 +1000,7 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
       </div>
       <div className="tb-right">
         <PeerPips peers={peers} />
-        <div className="live-badge" title={status === "live" ? "실시간 연결됨" : "연결 중"}><span className={`live-dot ${status === "live" ? "on" : ""}`} />{status === "live" ? `${Object.keys(peers).length + 1}명` : "연결 중"}</div>
+        <button className={`live-badge ${admin ? "is-manageable" : ""}`} title={admin ? "모든 참가자 관리" : status === "live" ? "실시간 연결됨" : "연결 중"} onClick={() => { if (admin) onShowParticipants(); }}><span className={`live-dot ${status === "live" ? "on" : ""}`} />{status === "live" ? `${Object.keys(peers).length + 1}명` : "연결 중"}</button>
         {editing ? (
           <span className="name-edit">
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => {
@@ -1446,10 +1547,8 @@ function Avatar({ user, s = 26 }: { user: UserRecord; s?: number }) {
 function SubmissionBoard({ participants, items, me, admin, onDelete, onCopy, onReact, reactions, onTogglePin, dense }: { participants: UserRecord[]; items: ItemRecord[]; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; dense: boolean }) {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const roster = useMemo(() => {
-    const users = new Map(participants.map((user) => [user.id, user]));
-    items.forEach((item) => users.set(item.user.id, { ...item.user, admin: false }));
-    return [...users.values()].sort((a, b) => (a.display || a.nick).localeCompare(b.display || b.nick, "ko"));
-  }, [items, participants]);
+    return [...participants].sort((a, b) => (a.display || a.nick).localeCompare(b.display || b.nick, "ko"));
+  }, [participants]);
   const itemsByUser = useMemo(() => {
     const grouped = new Map<string, ItemRecord[]>();
     items.forEach((item) => grouped.set(item.user.id, [...(grouped.get(item.user.id) ?? []), item]));
@@ -1580,9 +1679,9 @@ function FileBody({ file }: { file: FilePayload }) {
   const isImg = file.mime.startsWith("image/");
   const source = file.url ?? file.dataUrl;
   const downloadUrl = file.url ? `${file.url}?download=1` : source;
-  if (isImg) return <div className="file-img">{source ? <img className="file-preview" src={source} alt={file.name} /> : <Placeholder label={`이미지 미리보기 · ${file.name}`} h={196} />}<div className="file-foot"><I.image s={14} /><span className="file-name">{file.name}</span><span className="file-sz">{fmtSize(file.size)}</span><a className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={14} /></a></div></div>;
+  if (isImg) return <div className="file-img">{source ? <a className="file-direct-preview" href={source} target="_blank" rel="noreferrer" title={`${file.name} 열기`}><img className="file-preview" src={source} alt={file.name} /></a> : <Placeholder label={`이미지 미리보기 · ${file.name}`} h={196} />}<div className="file-foot"><I.image s={14} />{source ? <a className="file-name file-direct-name" href={source} target="_blank" rel="noreferrer">{file.name}</a> : <span className="file-name">{file.name}</span>}<span className="file-sz">{fmtSize(file.size)}</span><a className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" aria-label={`${file.name} 다운로드`} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={14} /></a></div></div>;
   const ext = file.name.split(".").pop()?.toUpperCase() ?? "FILE";
-  return <a className="file-doc" href={downloadUrl ?? "#"} download={file.name} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span><span className="file-dl"><I.download s={16} /></span></a>;
+  return <div className="file-doc"><a className="file-direct" href={source ?? "#"} target="_blank" rel="noreferrer" onClick={(e) => { if (!source) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span></a><a className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" aria-label={`${file.name} 다운로드`} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={16} /></a></div>;
 }
 
 function Reactions({ itemId, reactions, myId, onReact }: { itemId: string; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {

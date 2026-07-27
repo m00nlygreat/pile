@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createItem, defaultChannelExists } from "@/lib/db";
+import { createItem, defaultChannelExists, wasBoardUserRemoved } from "@/lib/db";
 import { enrichLink } from "@/lib/link-meta";
 import type { FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
@@ -41,6 +41,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
   }
   if (!validUser(body.user)) {
     return NextResponse.json({ error: "작성자 정보가 필요합니다." }, { status: 400 });
+  }
+  if (wasBoardUserRemoved(boardId, body.user.id)) {
+    return NextResponse.json({ error: "다시 접속하면 새 참가자로 참여할 수 있습니다.", resetId: true }, { status: 409 });
   }
   if (body.type === "text" && !body.body?.trim()) {
     return NextResponse.json({ error: "본문이 필요합니다." }, { status: 400 });
