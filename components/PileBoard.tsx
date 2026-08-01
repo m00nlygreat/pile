@@ -83,6 +83,26 @@ function fmtSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+async function imageBlobAsPng(blob: Blob) {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas is unavailable");
+    context.drawImage(bitmap, 0, 0);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((png) => {
+        if (png) resolve(png);
+        else reject(new Error("PNG conversion failed"));
+      }, "image/png");
+    });
+  } finally {
+    bitmap.close();
+  }
+}
+
 function fmtTime(d: number) {
   return new Date(d).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 }
@@ -683,10 +703,36 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     setMoveTarget(null);
     toast(`#${destination.name} 채널로 옮겼어요`, I.hash);
   };
-  const copyItem = (item: ItemRecord) => {
+  const copyItem = async (item: ItemRecord) => {
+    const imageSource = item.type === "file" && item.file?.mime.startsWith("image/")
+      ? item.file.url ?? item.file.dataUrl
+      : null;
+    if (imageSource) {
+      try {
+        if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+          throw new Error("Image clipboard is not supported");
+        }
+        const png = fetch(imageSource).then(async (response) => {
+          if (!response.ok) throw new Error("Image download failed");
+          const sourceBlob = await response.blob();
+          return sourceBlob.type === "image/png" ? sourceBlob : imageBlobAsPng(sourceBlob);
+        });
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+        toast("이미지를 클립보드에 복사했어요", I.copy);
+        return;
+      } catch {
+        toast("이미지를 복사할 수 없어요", I.copy);
+        return;
+      }
+    }
     const text = item.type === "text" ? item.body ?? "" : item.type === "link" ? item.link?.url ?? "" : item.file?.name ?? "";
-    navigator.clipboard?.writeText(text).catch(() => undefined);
-    toast("클립보드에 복사했어요", I.copy);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Text clipboard is not supported");
+      await navigator.clipboard.writeText(text);
+      toast("클립보드에 복사했어요", I.copy);
+    } catch {
+      toast("클립보드에 복사할 수 없어요", I.copy);
+    }
   };
   const react = async (itemId: string, emoji: string) => {
     const user = ensureMe();

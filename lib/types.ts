@@ -58,3 +58,9 @@ export type BoardPayload = {
   items: ItemRecord[];
   reactions: Record<string, Record<string, string[]>>;
 };
+
+export type BoardSummary = {
+  id: string;
+  displayName: string;
+  createdAt: number;
+};

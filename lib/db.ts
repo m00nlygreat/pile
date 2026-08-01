@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
 import { deleteStoredFileSync } from "@/lib/file-storage";
 import { slugFromChannelName, uniqueSlug } from "@/lib/slug";
-import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
+import type { BoardPayload, BoardSummary, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 const DB_PATH = process.env.PILE_DB_PATH || join(process.cwd(), "data", "pile.sqlite");
 let db: DatabaseSync | null = null;
@@ -193,6 +193,18 @@ export function ensureBoard(boardId: string) {
 
 function boardExists(boardId: string) {
   return Boolean(getDb().prepare("SELECT 1 FROM boards WHERE id = ?").get(boardId));
+}
+
+export function listBoards(): BoardSummary[] {
+  const conn = getDb();
+  const boardRows = conn
+    .prepare("SELECT id, display_name as displayName, created_at as createdAt FROM boards ORDER BY created_at DESC")
+    .all() as { id: string; displayName: string; createdAt: number }[];
+  return boardRows.map((board) => ({
+    id: String(board.id),
+    displayName: String(board.displayName),
+    createdAt: Number(board.createdAt),
+  }));
 }
 
 export function getBoardPayload(boardId: string): BoardPayload {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { readRecentBoards } from "@/lib/recent-boards";
+import type { BoardSummary } from "@/lib/types";
 
 const WORDS = ["ocean", "forest", "canyon", "meadow", "harbor", "summit", "valley", "ridge"];
 
@@ -16,10 +17,18 @@ function randomId() {
 export default function HomePage() {
   const [input, setInput] = useState("");
   const [recentBoards, setRecentBoards] = useState<string[]>([]);
+  const [adminBoards, setAdminBoards] = useState<BoardSummary[]>([]);
   const router = useRouter();
+  const unvisitedAdminBoards = adminBoards.filter((board) => !recentBoards.includes(board.id));
 
   useEffect(() => {
     setRecentBoards(readRecentBoards());
+    const controller = new AbortController();
+    fetch("/api/admin/boards", { cache: "no-store", signal: controller.signal })
+      .then((res) => res.ok ? res.json() as Promise<{ boards?: BoardSummary[] }> : null)
+      .then((data) => setAdminBoards(data?.boards ?? []))
+      .catch(() => undefined);
+    return () => controller.abort();
   }, []);
 
   function navigate(raw: string) {
@@ -83,6 +92,29 @@ export default function HomePage() {
               <Link className="recent-board-link" href={`/${encodeURIComponent(boardId)}`} key={boardId}>
                 <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
                 <span>{boardId}</span>
+                <b aria-hidden="true">→</b>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {unvisitedAdminBoards.length > 0 && (
+        <section className="recent-boards admin-boards" aria-labelledby="admin-boards-title">
+          <div className="recent-boards-head">
+            <h2 id="admin-boards-title">방문하지 않은 보드</h2>
+            <span>{unvisitedAdminBoards.length}</span>
+          </div>
+          <div className="recent-board-list">
+            {unvisitedAdminBoards.map((board) => (
+              <Link
+                className="recent-board-link admin-board-link"
+                href={`/${encodeURIComponent(board.id)}`}
+                key={board.id}
+                aria-label={`${board.displayName} 보드로 이동`}
+              >
+                <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
+                <span className="admin-board-name">{board.displayName}</span>
                 <b aria-hidden="true">→</b>
               </Link>
             ))}
