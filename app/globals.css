@@ -111,6 +111,10 @@ kbd {
 .recent-board-mark i:nth-child(1) { width: 10px; opacity: .55; }
 .recent-board-mark i:nth-child(2) { width: 14px; opacity: .78; }
 .recent-board-mark i:nth-child(3) { width: 17px; }
+.admin-boards { margin-top: 24px; }
+.admin-board-name { opacity: 0; transition: opacity .15s; }
+.admin-board-link:hover .admin-board-name,
+.admin-board-link:focus-visible .admin-board-name { opacity: 1; }
 
 .topbar {
   display: flex;
