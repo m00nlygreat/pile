@@ -102,10 +102,14 @@ kbd {
 .recent-boards-head h2 { margin: 0; color: var(--muted); font-size: 12px; font-weight: 650; letter-spacing: .03em; }
 .recent-boards-head > span { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-family: var(--mono); font-size: 10px; }
 .recent-board-list { display: flex; flex-direction: column; gap: 7px; }
-.recent-board-link { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 11px 13px; border: 1px solid var(--hair-2); border-radius: 11px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-card); text-decoration: none; transition: border-color .15s, box-shadow .15s, transform .15s; }
-.recent-board-link:hover { border-color: var(--accent); box-shadow: 0 10px 24px -14px oklch(0.35 0.035 65 / .36); transform: translateY(-1px); }
-.recent-board-link > span:nth-child(2) { overflow: hidden; flex: 1 1 auto; font-family: var(--mono); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.recent-board-link > b { color: var(--accent-ink); font-size: 14px; font-weight: 600; }
+.recent-board-link { display: flex; align-items: center; min-width: 0; border: 1px solid var(--hair-2); border-radius: 11px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-card); transition: border-color .15s, box-shadow .15s, transform .15s; }
+.recent-board-link:hover, .recent-board-link:focus-within { border-color: var(--accent); box-shadow: 0 10px 24px -14px oklch(0.35 0.035 65 / .36); transform: translateY(-1px); }
+.recent-board-target { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; padding: 11px 6px 11px 13px; color: inherit; text-decoration: none; }
+.recent-board-target > span:nth-child(2) { overflow: hidden; flex: 1 1 auto; font-family: var(--mono); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.recent-board-target > b { color: var(--accent-ink); font-size: 14px; font-weight: 600; }
+.recent-board-delete { display: grid; place-items: center; width: 34px; height: 34px; margin-right: 5px; flex: 0 0 auto; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transition: color .15s, background .15s; }
+.recent-board-delete:hover, .recent-board-delete:focus-visible { background: oklch(0.94 0.035 25); color: oklch(0.52 0.18 25); outline: none; }
+.recent-board-delete:disabled { cursor: wait; opacity: .45; }
 .recent-board-mark { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1.5px; width: 17px; flex: 0 0 auto; transform: rotate(-3deg); }
 .recent-board-mark i { display: block; height: 3px; border-radius: 2px; background: var(--accent); }
 .recent-board-mark i:nth-child(1) { width: 10px; opacity: .55; }

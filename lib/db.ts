@@ -207,6 +207,35 @@ export function listBoards(): BoardSummary[] {
   }));
 }
 
+export function deleteBoard(boardId: string) {
+  const conn = getDb();
+  const exists = conn.prepare("SELECT 1 FROM boards WHERE id = ?").get(boardId);
+  if (!exists) return { ok: true as const, deleted: false, deletedItems: 0 };
+
+  const itemRows = conn
+    .prepare("SELECT id, type FROM items WHERE board_id = ?")
+    .all(boardId) as { id: string; type: ItemRecord["type"] }[];
+
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    conn.prepare("DELETE FROM reactions WHERE item_id IN (SELECT id FROM items WHERE board_id = ?)").run(boardId);
+    conn.prepare("DELETE FROM items WHERE board_id = ?").run(boardId);
+    conn.prepare("DELETE FROM channels WHERE board_id = ?").run(boardId);
+    conn.prepare("DELETE FROM board_users WHERE board_id = ?").run(boardId);
+    conn.prepare("DELETE FROM board_removed_users WHERE board_id = ?").run(boardId);
+    conn.prepare("DELETE FROM boards WHERE id = ?").run(boardId);
+    conn.exec("COMMIT");
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
+
+  itemRows
+    .filter((item) => item.type === "file")
+    .forEach((item) => deleteStoredFileSync(String(item.id)));
+  return { ok: true as const, deleted: true, deletedItems: itemRows.length };
+}
+
 export function getBoardPayload(boardId: string): BoardPayload {
   const conn = getDb();
   const boardRow = conn.prepare("SELECT id, display_name as displayName FROM boards WHERE id = ?").get(boardId) as
@@ -417,9 +446,10 @@ export function getChannelBySlug(boardId: string, channelSlug: string) {
 }
 
 export function upsertBoardUser(boardId: string, user: UserRecord) {
-  ensureBoard(boardId);
   const nick = user.nick || user.display || "익명";
   const display = user.display || nick;
+  const normalized = { ...user, nick, display, admin: false };
+  if (!boardExists(boardId)) return normalized;
   getDb()
     .prepare(`
       INSERT INTO board_users (board_id, user_id, nick, display, updated_at)
@@ -430,7 +460,7 @@ export function upsertBoardUser(boardId: string, user: UserRecord) {
         updated_at = excluded.updated_at
     `)
     .run(boardId, user.id, nick, display, Date.now());
-  return { ...user, nick, display, admin: false };
+  return normalized;
 }
 
 export function wasBoardUserRemoved(boardId: string, userId: string) {
@@ -438,7 +468,7 @@ export function wasBoardUserRemoved(boardId: string, userId: string) {
 }
 
 export function listBoardUsers(boardId: string) {
-  ensureBoard(boardId);
+  if (!boardExists(boardId)) return [];
   const rows = getDb()
     .prepare("SELECT user_id as userId, nick, display, updated_at as updatedAt FROM board_users WHERE board_id = ? ORDER BY updated_at DESC")
     .all(boardId) as { userId: string; nick: string; display: string; updatedAt: number }[];
@@ -452,7 +482,7 @@ export function listBoardUsers(boardId: string) {
 }
 
 export function removeBoardUser(boardId: string, userId: string) {
-  ensureBoard(boardId);
+  if (!boardExists(boardId)) return;
   const conn = getDb();
   conn.exec("BEGIN IMMEDIATE");
   try {

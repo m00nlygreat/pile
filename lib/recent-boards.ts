@@ -24,3 +24,17 @@ export function rememberBoard(boardId: string) {
     // Browsing still works when storage is blocked or unavailable.
   }
 }
+
+export function forgetBoard(boardId: string) {
+  if (typeof window === "undefined") return;
+  const normalized = boardId.trim();
+  if (!normalized) return;
+  try {
+    window.localStorage.setItem(
+      RECENT_BOARDS_KEY,
+      JSON.stringify(readRecentBoards().filter((saved) => saved !== normalized)),
+    );
+  } catch {
+    // The server-side deletion still succeeds when storage is unavailable.
+  }
+}

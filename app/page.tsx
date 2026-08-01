@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { readRecentBoards } from "@/lib/recent-boards";
+import { I } from "@/components/icons";
+import { forgetBoard, readRecentBoards } from "@/lib/recent-boards";
 import type { BoardSummary } from "@/lib/types";
 
 const WORDS = ["ocean", "forest", "canyon", "meadow", "harbor", "summit", "valley", "ridge"];
@@ -18,6 +19,8 @@ export default function HomePage() {
   const [input, setInput] = useState("");
   const [recentBoards, setRecentBoards] = useState<string[]>([]);
   const [adminBoards, setAdminBoards] = useState<BoardSummary[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [deletingBoardId, setDeletingBoardId] = useState<string | null>(null);
   const router = useRouter();
   const unvisitedAdminBoards = adminBoards.filter((board) => !recentBoards.includes(board.id));
 
@@ -25,7 +28,10 @@ export default function HomePage() {
     setRecentBoards(readRecentBoards());
     const controller = new AbortController();
     fetch("/api/admin/boards", { cache: "no-store", signal: controller.signal })
-      .then((res) => res.ok ? res.json() as Promise<{ boards?: BoardSummary[] }> : null)
+      .then((res) => {
+        setIsAdmin(res.ok);
+        return res.ok ? res.json() as Promise<{ boards?: BoardSummary[] }> : null;
+      })
       .then((data) => setAdminBoards(data?.boards ?? []))
       .catch(() => undefined);
     return () => controller.abort();
@@ -34,6 +40,39 @@ export default function HomePage() {
   function navigate(raw: string) {
     const id = raw.trim().replace(/\s+/g, "-").toLowerCase();
     if (id) router.push(`/${encodeURIComponent(id)}`);
+  }
+
+  async function deleteBoard(boardId: string, displayName = boardId) {
+    if (deletingBoardId || !window.confirm(`${displayName} 보드와 모든 내용을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+
+    setDeletingBoardId(boardId);
+    try {
+      const response = await fetch(`/api/admin/boards/${encodeURIComponent(boardId)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("delete failed");
+      forgetBoard(boardId);
+      setRecentBoards((boards) => boards.filter((saved) => saved !== boardId));
+      setAdminBoards((boards) => boards.filter((board) => board.id !== boardId));
+    } catch {
+      window.alert("보드를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setDeletingBoardId(null);
+    }
+  }
+
+  function BoardDeleteButton({ boardId, displayName }: { boardId: string; displayName?: string }) {
+    const deleting = deletingBoardId === boardId;
+    return (
+      <button
+        className="recent-board-delete"
+        type="button"
+        aria-label={`${displayName ?? boardId} 보드 ${deleting ? "삭제 중" : "삭제"}`}
+        title="보드 삭제"
+        disabled={Boolean(deletingBoardId)}
+        onClick={() => deleteBoard(boardId, displayName)}
+      >
+        <I.trash s={15} />
+      </button>
+    );
   }
 
   return (
@@ -89,11 +128,14 @@ export default function HomePage() {
           </div>
           <div className="recent-board-list">
             {recentBoards.map((boardId) => (
-              <Link className="recent-board-link" href={`/${encodeURIComponent(boardId)}`} key={boardId}>
-                <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
-                <span>{boardId}</span>
-                <b aria-hidden="true">→</b>
-              </Link>
+              <div className="recent-board-link" key={boardId}>
+                <Link className="recent-board-target" href={`/${encodeURIComponent(boardId)}`}>
+                  <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
+                  <span>{boardId}</span>
+                  <b aria-hidden="true">→</b>
+                </Link>
+                {isAdmin && <BoardDeleteButton boardId={boardId} />}
+              </div>
             ))}
           </div>
         </section>
@@ -107,16 +149,18 @@ export default function HomePage() {
           </div>
           <div className="recent-board-list">
             {unvisitedAdminBoards.map((board) => (
-              <Link
-                className="recent-board-link admin-board-link"
-                href={`/${encodeURIComponent(board.id)}`}
-                key={board.id}
-                aria-label={`${board.displayName} 보드로 이동`}
-              >
-                <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
-                <span className="admin-board-name">{board.displayName}</span>
-                <b aria-hidden="true">→</b>
-              </Link>
+              <div className="recent-board-link admin-board-link" key={board.id}>
+                <Link
+                  className="recent-board-target"
+                  href={`/${encodeURIComponent(board.id)}`}
+                  aria-label={`${board.displayName} 보드로 이동`}
+                >
+                  <span className="recent-board-mark" aria-hidden="true"><i /><i /><i /></span>
+                  <span className="admin-board-name">{board.displayName}</span>
+                  <b aria-hidden="true">→</b>
+                </Link>
+                <BoardDeleteButton boardId={board.id} displayName={board.displayName} />
+              </div>
             ))}
           </div>
         </section>
