@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { I } from "@/components/icons";
-import { forgetBoard, readRecentBoards } from "@/lib/recent-boards";
+import { clearRecentBoards, forgetBoard, readRecentBoards } from "@/lib/recent-boards";
 import type { BoardSummary } from "@/lib/types";
 
 const WORDS = ["ocean", "forest", "canyon", "meadow", "harbor", "summit", "valley", "ridge"];
@@ -40,6 +40,11 @@ export default function HomePage() {
   function navigate(raw: string) {
     const id = raw.trim().replace(/\s+/g, "-").toLowerCase();
     if (id) router.push(`/${encodeURIComponent(id)}`);
+  }
+
+  function clearHistory() {
+    clearRecentBoards();
+    setRecentBoards([]);
   }
 
   async function deleteBoard(boardId: string, displayName = boardId) {
@@ -125,6 +130,7 @@ export default function HomePage() {
           <div className="recent-boards-head">
             <h2 id="recent-boards-title">최근 방문한 보드</h2>
             <span>{recentBoards.length}</span>
+            <button className="recent-boards-clear" type="button" onClick={clearHistory}>비우기</button>
           </div>
           <div className="recent-board-list">
             {recentBoards.map((boardId) => (

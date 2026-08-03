@@ -38,3 +38,12 @@ export function forgetBoard(boardId: string) {
     // The server-side deletion still succeeds when storage is unavailable.
   }
 }
+
+export function clearRecentBoards() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(RECENT_BOARDS_KEY);
+  } catch {
+    // The in-memory list can still be cleared when storage is unavailable.
+  }
+}
