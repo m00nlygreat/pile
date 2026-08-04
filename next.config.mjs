@@ -8,6 +8,9 @@ const nextConfig = {
     "*.local",
   ],
   serverExternalPackages: [],
+  experimental: {
+    useTypeScriptCli: true,
+  },
   async headers() {
     return [
       {

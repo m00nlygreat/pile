@@ -567,6 +567,19 @@ export function getItemFile(itemId: string) {
   return row?.file_json ? tryJson<FilePayload>(row.file_json) : null;
 }
 
+export function getItemSource(itemId: string) {
+  const row = getDb()
+    .prepare("SELECT type, body, link_json, file_json FROM items WHERE id = ?")
+    .get(itemId) as { type: string; body: string | null; link_json: string | null; file_json: string | null } | undefined;
+  if (!row) return null;
+  return {
+    type: row.type as ItemRecord["type"],
+    body: row.body == null ? undefined : String(row.body),
+    link: row.link_json == null ? undefined : tryJson<LinkPayload>(row.link_json) ?? undefined,
+    file: row.file_json == null ? undefined : tryJson<FilePayload>(row.file_json) ?? undefined,
+  };
+}
+
 const POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
 export function toggleReaction(itemId: string, emoji: string, userId: string) {

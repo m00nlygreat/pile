@@ -416,10 +416,6 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     router.replace(channelPath(boardId, fallback));
   }, [boardId, channel, channels, router]);
   useEffect(() => {
-    if (!admin) {
-      setItemContext(null);
-      return;
-    }
     const openItemMenu = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -433,7 +429,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     };
     document.addEventListener("contextmenu", openItemMenu, true);
     return () => document.removeEventListener("contextmenu", openItemMenu, true);
-  }, [admin, items]);
+  }, [items]);
   useEffect(() => {
     if (adminSessionCache !== undefined) {
       setAdmin(adminSessionCache);
@@ -734,6 +730,16 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       toast("클립보드에 복사할 수 없어요", I.copy);
     }
   };
+  const copyItemLink = async (item: ItemRecord) => {
+    const url = new URL(`/x/${encodeURIComponent(item.id)}`, window.location.origin).toString();
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Text clipboard is not supported");
+      await navigator.clipboard.writeText(url);
+      toast("게시물 링크를 복사했어요", I.link);
+    } catch {
+      toast("게시물 링크를 복사할 수 없어요", I.link);
+    }
+  };
   const react = async (itemId: string, emoji: string) => {
     const user = ensureMe();
     const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/reactions`, {
@@ -758,6 +764,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   return (
     <div
       className="app tex pile-stack col-two"
+      onDragStart={(event) => event.preventDefault()}
       onDragEnter={(e) => {
         e.preventDefault();
         dragDepth.current += 1;
@@ -783,7 +790,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} onShowParticipants={() => setShowParticipants(true)} />
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
       {showParticipants && admin && <ParticipantsModal boardId={boardId} me={me2} onClose={() => setShowParticipants(false)} onKicked={(userId) => setParticipants((current) => current.filter((user) => user.id !== userId))} />}
-      {itemContext && <ItemContextMenu state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} />}
+      {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} />}
       {moveTarget && <MoveChannelModal channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
@@ -929,7 +936,7 @@ function ParticipantsModal({ boardId, me, onClose, onKicked }: { boardId: string
   );
 }
 
-function ItemContextMenu({ state, onClose, onMove }: { state: ItemContextState; onClose: () => void; onMove: () => void }) {
+function ItemContextMenu({ admin, state, onClose, onMove, onCopyLink }: { admin: boolean; state: ItemContextState; onClose: () => void; onMove: () => void; onCopyLink: (item: ItemRecord) => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(() => ({
     left: Math.max(8, Math.min(state.x, window.innerWidth - 228)),
@@ -969,7 +976,8 @@ function ItemContextMenu({ state, onClose, onMove }: { state: ItemContextState; 
 
   return (
     <div ref={menuRef} className="item-context-menu" role="menu" aria-label="게시물 관리" style={position} onContextMenu={(event) => event.preventDefault()}>
-      <button role="menuitem" onClick={onMove}><I.hash s={15} /><span>다른 채널로 이동</span></button>
+      {admin && <button role="menuitem" onClick={onMove}><I.hash s={15} /><span>다른 채널로 이동</span></button>}
+      <button role="menuitem" onClick={() => { onCopyLink(state.item); onClose(); }}><I.link s={15} /><span>게시물 링크 복사</span></button>
     </div>
   );
 }
@@ -1672,7 +1680,7 @@ function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense
   const canDelete = admin || item.user.id === me.id;
   const mine = item.user.id === me.id;
   return (
-    <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type} data-item-id={item.id} title={admin ? "우클릭하여 다른 채널로 이동" : undefined}>
+    <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type} data-item-id={item.id} draggable={false} tabIndex={0} title={admin ? "우클릭하여 게시물 관리" : undefined}>
       <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">관리자</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
       <div className="card-body">{item.type === "text" && <TextBody item={item} reactions={reactions} myId={me.id} onReact={onReact} />}{item.type === "link" && item.link && <LinkBody link={item.link} />}{item.type === "file" && item.file && <FileBody file={item.file} />}</div>
       <Reactions itemId={item.id} reactions={reactions} myId={me.id} onReact={onReact} />
@@ -1740,17 +1748,17 @@ function PollBlock({ choices, itemId, reactions, myId, onReact }: { choices: str
 
 function LinkBody({ link }: { link: LinkPayload }) {
   const yt = link.youtube || ytId(link.url);
-  if (yt) return <div className="link-yt"><div className="yt-embed"><iframe src={`https://www.youtube.com/embed/${yt}`} title={link.title || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen loading="lazy" referrerPolicy="strict-origin-when-cross-origin" /><span className="yt-badge">youtube.com</span></div><a className="yt-title" href={link.url} target="_blank" rel="noopener noreferrer">{link.title}</a></div>;
-  return <a className="link-card" href={link.url} target="_blank" rel="noopener noreferrer">{link.image && <div className="link-img"><img className="link-preview" src={link.image} alt="" loading="lazy" /></div>}<div className="link-meta"><span className="link-site"><I.link s={12} />{link.site}</span><span className="link-title">{link.title}</span>{link.desc && <span className="link-desc">{link.desc}</span>}<span className="link-url">{link.url}</span></div></a>;
+  if (yt) return <div className="link-yt"><div className="yt-embed"><iframe src={`https://www.youtube.com/embed/${yt}`} title={link.title || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen loading="lazy" referrerPolicy="strict-origin-when-cross-origin" /><span className="yt-badge">youtube.com</span></div><a draggable={false} className="yt-title" href={link.url} target="_blank" rel="noopener noreferrer">{link.title}</a></div>;
+  return <a draggable={false} className="link-card" href={link.url} target="_blank" rel="noopener noreferrer">{link.image && <div className="link-img"><img draggable={false} className="link-preview" src={link.image} alt="" loading="lazy" /></div>}<div className="link-meta"><span className="link-site"><I.link s={12} />{link.site}</span><span className="link-title">{link.title}</span>{link.desc && <span className="link-desc">{link.desc}</span>}<span className="link-url">{link.url}</span></div></a>;
 }
 
 function FileBody({ file }: { file: FilePayload }) {
   const isImg = file.mime.startsWith("image/");
   const source = file.url ?? file.dataUrl;
   const downloadUrl = file.url ? `${file.url}?download=1` : source;
-  if (isImg) return <div className="file-img">{source ? <a className="file-direct-preview" href={source} target="_blank" rel="noreferrer" title={`${file.name} 열기`}><img className="file-preview" src={source} alt={file.name} /></a> : <Placeholder label={`이미지 미리보기 · ${file.name}`} h={196} />}<div className="file-foot"><I.image s={14} />{source ? <a className="file-name file-direct-name" href={source} target="_blank" rel="noreferrer">{file.name}</a> : <span className="file-name">{file.name}</span>}<span className="file-sz">{fmtSize(file.size)}</span><a className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" aria-label={`${file.name} 다운로드`} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={14} /></a></div></div>;
+  if (isImg) return <div className="file-img">{source ? <a draggable={false} className="file-direct-preview" href={source} target="_blank" rel="noreferrer" title={`${file.name} 열기`}><img draggable={false} className="file-preview" src={source} alt={file.name} /></a> : <Placeholder label={`이미지 미리보기 · ${file.name}`} h={196} />}<div className="file-foot"><I.image s={14} />{source ? <a draggable={false} className="file-name file-direct-name" href={source} target="_blank" rel="noreferrer">{file.name}</a> : <span className="file-name">{file.name}</span>}<span className="file-sz">{fmtSize(file.size)}</span><a draggable={false} className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" aria-label={`${file.name} 다운로드`} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={14} /></a></div></div>;
   const ext = file.name.split(".").pop()?.toUpperCase() ?? "FILE";
-  return <div className="file-doc"><a className="file-direct" href={source ?? "#"} target="_blank" rel="noreferrer" onClick={(e) => { if (!source) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span></a><a className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" aria-label={`${file.name} 다운로드`} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={16} /></a></div>;
+  return <div className="file-doc"><a draggable={false} className="file-direct" href={source ?? "#"} target="_blank" rel="noreferrer" onClick={(e) => { if (!source) e.preventDefault(); }}><span className="file-ext">{ext}</span><span className="file-doc-meta"><span className="file-name">{file.name}</span><span className="file-sz">{file.mime} · {fmtSize(file.size)}</span></span></a><a draggable={false} className="file-dl" href={downloadUrl ?? "#"} download={file.name} title="다운로드" aria-label={`${file.name} 다운로드`} onClick={(e) => { if (!downloadUrl) e.preventDefault(); }}><I.download s={16} /></a></div>;
 }
 
 function Reactions({ itemId, reactions, myId, onReact }: { itemId: string; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {

@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { deleteItem, isAdminRequest, moveItemToChannel, setPinned } from "@/lib/db";
+import { itemResponse } from "@/lib/item-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export async function GET(request: Request, { params }: { params: Promise<{ itemId: string }> }) {
+  const { itemId: rawItemId } = await params;
+  return itemResponse(request, decodeURIComponent(rawItemId));
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ itemId: string }> }) {
   if (!(await isAdminRequest())) {
