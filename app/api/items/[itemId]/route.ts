@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteItem, isAdminRequest, moveItemToChannel, setPinned } from "@/lib/db";
+import { deleteItem, isAdminRequest, moveItemToChannel, setPinned, updateChecklist } from "@/lib/db";
 import { itemResponse } from "@/lib/item-response";
 
 export const runtime = "nodejs";
@@ -11,13 +11,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ item
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ itemId: string }> }) {
+  const { itemId } = await params;
+  const body = (await request.json()) as { pinned?: boolean; destinationChannelId?: string; taskIndex?: number; checked?: boolean };
+  const decodedItemId = decodeURIComponent(itemId);
+  if (Number.isInteger(body.taskIndex) && typeof body.checked === "boolean") {
+    const result = updateChecklist(decodedItemId, body.taskIndex as number, body.checked);
+    if (!result.ok) {
+      const status = result.reason === "not-found" ? 404 : 400;
+      return NextResponse.json({ error: "체크리스트 항목을 찾을 수 없습니다." }, { status });
+    }
+    return NextResponse.json(result);
+  }
   if (!(await isAdminRequest())) {
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
-  const { itemId } = await params;
-  const body = (await request.json()) as { pinned?: boolean; destinationChannelId?: string };
   if (body.destinationChannelId) {
-    const result = moveItemToChannel(decodeURIComponent(itemId), body.destinationChannelId.trim());
+    const result = moveItemToChannel(decodedItemId, body.destinationChannelId.trim());
     if (!result.ok) {
       const message = result.reason === "same-channel"
         ? "현재 채널로는 이동할 수 없습니다."
@@ -28,7 +37,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     }
     return NextResponse.json(result);
   }
-  setPinned(decodeURIComponent(itemId), Boolean(body.pinned));
+  setPinned(decodedItemId, Boolean(body.pinned));
   return NextResponse.json({ ok: true });
 }
 

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
 import { deleteStoredFileSync } from "@/lib/file-storage";
+import { toggleMarkdownChecklist } from "@/lib/markdown-checklist";
 import { slugFromChannelName, uniqueSlug } from "@/lib/slug";
 import type { BoardPayload, BoardSummary, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
@@ -527,6 +528,18 @@ export function createItem(boardId: string, input: Omit<ItemRecord, "id" | "boar
 
 export function setPinned(itemId: string, pinned: boolean) {
   getDb().prepare("UPDATE items SET pinned = ? WHERE id = ?").run(pinned ? 1 : 0, itemId);
+}
+
+export function updateChecklist(itemId: string, taskIndex: number, checked: boolean) {
+  const conn = getDb();
+  const row = conn.prepare("SELECT type, body FROM items WHERE id = ?").get(itemId) as { type: ItemRecord["type"]; body: string | null } | undefined;
+  if (!row) return { ok: false as const, reason: "not-found" as const };
+  if (row.type !== "text" || row.body == null) return { ok: false as const, reason: "not-checklist" as const };
+
+  const body = toggleMarkdownChecklist(row.body, taskIndex, checked);
+  if (body == null) return { ok: false as const, reason: "task-not-found" as const };
+  if (body !== row.body) conn.prepare("UPDATE items SET body = ? WHERE id = ?").run(body, itemId);
+  return { ok: true as const, body };
 }
 
 export function moveItemToChannel(itemId: string, destinationChannelId: string) {

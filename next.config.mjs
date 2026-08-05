@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Development only: do not block the local/in-app preview origin.
+  allowedDevOrigins: ["**.*", "null"],
   serverExternalPackages: [],
   experimental: {
     useTypeScriptCli: true,

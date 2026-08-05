@@ -22,6 +22,7 @@ const addClass = (node: HastNode, className: string) => {
 };
 
 function markdownClasses() {
+  let taskIndex = 0;
   const visit = (node: HastNode) => {
     if (node.type === "element") {
       if (node.tagName === "a") {
@@ -39,7 +40,13 @@ function markdownClasses() {
       if (node.tagName === "table") addClass(node, "md-table");
       if (node.tagName === "hr") addClass(node, "md-hr");
       if (node.tagName === "code") addClass(node, "md-code");
-      if (node.tagName === "input") addClass(node, "md-box");
+      if (node.tagName === "input") {
+        addClass(node, "md-box");
+        if (node.properties) delete node.properties.disabled;
+        node.properties ??= {};
+        node.properties["data-task-index"] = String(taskIndex++);
+        node.properties.ariaLabel = "체크리스트 항목";
+      }
 
       if (node.tagName === "li") {
         const hasTask = (node.children ?? []).some((child) => child.tagName === "input");
@@ -101,7 +108,7 @@ const schema: SanitizeSchema = {
     h3: [["className"]],
     h4: [["className"]],
     hr: [["className"]],
-    input: [["className"], ["type", "checkbox"], ["checked"], ["disabled"]],
+    input: [["className"], ["type", "checkbox"], ["checked"], ["data-task-index"], ["ariaLabel"]],
     li: [["className"]],
     ol: [["className"]],
     p: [["className"]],
@@ -109,6 +116,10 @@ const schema: SanitizeSchema = {
     span: [...(defaultSchema.attributes?.span ?? []), ["className"]],
     table: [["className"]],
     ul: [["className"]],
+  },
+  required: {
+    ...defaultSchema.required,
+    input: { type: "checkbox" },
   },
 };
 

@@ -12,6 +12,7 @@ import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable 
 import { CSS } from "@dnd-kit/utilities";
 import { I } from "@/components/icons";
 import { renderMarkdown } from "@/components/markdown";
+import { countMarkdownChecklistTasks, toggleMarkdownChecklist } from "@/lib/markdown-checklist";
 import { rememberBoard } from "@/lib/recent-boards";
 import type { BoardPayload, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
@@ -458,6 +459,16 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     window.setTimeout(() => setNewId(null), 900);
     requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
   }, []);
+  const receiveItem = useCallback((item: ItemRecord) => {
+    setItems((prev) => {
+      const existing = prev.findIndex((old) => old.id === item.id);
+      if (existing < 0) return [item, ...prev];
+      const next = [...prev];
+      next[existing] = item;
+      return next;
+    });
+    setParticipants((prev) => (prev.some((user) => user.id === item.user.id) ? prev : [...prev, { ...item.user, admin: false }]));
+  }, []);
   const applyServerPayload = useCallback((payload: BoardPayload) => {
     setChannels(payload.channels);
     setParticipants(payload.users);
@@ -471,10 +482,41 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     boardId,
     myName: me2.display || me2.nick,
     feedRef,
-    onReceiveItem: addItem,
+    onReceiveItem: receiveItem,
     onReceiveReactions: applyReactions,
   });
   useBoardSync(boardId, applyServerPayload, Object.keys(peers).length > 0);
+
+  const toggleChecklist = useCallback(async (itemId: string, taskIndex: number, checked: boolean) => {
+    const item = items.find((candidate) => candidate.id === itemId);
+    if (!item || item.type !== "text" || item.body == null) return;
+    const previousBody = item.body;
+    const optimisticBody = toggleMarkdownChecklist(previousBody, taskIndex, checked);
+    if (optimisticBody == null || optimisticBody === previousBody) return;
+
+    setItems((prev) => prev.map((old) => old.id === itemId && old.body === previousBody ? { ...old, body: optimisticBody } : old));
+    const revert = () => {
+      setItems((prev) => prev.map((old) => old.id === itemId && old.body === optimisticBody ? { ...old, body: previousBody } : old));
+      toast("체크리스트를 저장할 수 없어요", I.text);
+    };
+    try {
+      const res = await fetch(`/api/items/${encodeURIComponent(itemId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskIndex, checked }),
+      });
+      if (!res.ok) {
+        revert();
+        return;
+      }
+      const result = (await res.json()) as { body?: string };
+      const body = result.body ?? optimisticBody;
+      setItems((prev) => prev.map((old) => old.id === itemId && old.body === optimisticBody ? { ...old, body } : old));
+      broadcastItem({ ...item, body });
+    } catch {
+      revert();
+    }
+  }, [broadcastItem, items, toast]);
 
   const counts = useMemo(() => {
     const next: Record<string, number> = {};
@@ -740,6 +782,10 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       toast("게시물 링크를 복사할 수 없어요", I.link);
     }
   };
+  const openItemLink = (item: ItemRecord) => {
+    const url = new URL(`/x/${encodeURIComponent(item.id)}`, window.location.origin).toString();
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
   const react = async (itemId: string, emoji: string) => {
     const user = ensureMe();
     const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/reactions`, {
@@ -790,14 +836,14 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} onShowParticipants={() => setShowParticipants(true)} />
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
       {showParticipants && admin && <ParticipantsModal boardId={boardId} me={me2} onClose={() => setShowParticipants(false)} onKicked={(userId) => setParticipants((current) => current.filter((user) => user.id !== userId))} />}
-      {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} />}
+      {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} onOpenLink={(item) => { openItemLink(item); setItemContext(null); }} />}
       {moveTarget && <MoveChannelModal channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
-          <PinnedSection items={pinnedItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} dense={dense} />
+          <PinnedSection items={pinnedItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} onTaskToggle={toggleChecklist} dense={dense} />
           {currentChannel?.type === "submission" ? (
-            <SubmissionBoard participants={participants} items={channelItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} dense={dense} />
+            <SubmissionBoard participants={participants} items={channelItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} onTaskToggle={toggleChecklist} dense={dense} />
           ) : (
             <>
               {groups.length === 0 ? (
@@ -812,7 +858,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
                     </div>
                     <div className="session-items">
                       {group.items.map((item, idx) => (
-                        <ItemCard key={item.id} item={item} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions[item.id] ?? {}} isPinned={false} onTogglePin={togglePin} dense={dense} isNew={item.id === newId} style={{ "--rot": `${(idx % 3 - 1) * 0.7}deg` } as React.CSSProperties} />
+                        <ItemCard key={item.id} item={item} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions[item.id] ?? {}} isPinned={false} onTogglePin={togglePin} onTaskToggle={toggleChecklist} dense={dense} isNew={item.id === newId} style={{ "--rot": `${(idx % 3 - 1) * 0.7}deg` } as React.CSSProperties} />
                       ))}
                     </div>
                   </section>
@@ -936,7 +982,7 @@ function ParticipantsModal({ boardId, me, onClose, onKicked }: { boardId: string
   );
 }
 
-function ItemContextMenu({ admin, state, onClose, onMove, onCopyLink }: { admin: boolean; state: ItemContextState; onClose: () => void; onMove: () => void; onCopyLink: (item: ItemRecord) => void }) {
+function ItemContextMenu({ admin, state, onClose, onMove, onCopyLink, onOpenLink }: { admin: boolean; state: ItemContextState; onClose: () => void; onMove: () => void; onCopyLink: (item: ItemRecord) => void; onOpenLink: (item: ItemRecord) => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(() => ({
     left: Math.max(8, Math.min(state.x, window.innerWidth - 228)),
@@ -977,7 +1023,10 @@ function ItemContextMenu({ admin, state, onClose, onMove, onCopyLink }: { admin:
   return (
     <div ref={menuRef} className="item-context-menu" role="menu" aria-label="게시물 관리" style={position} onContextMenu={(event) => event.preventDefault()}>
       {admin && <button role="menuitem" onClick={onMove}><I.hash s={15} /><span>다른 채널로 이동</span></button>}
-      <button role="menuitem" onClick={() => { onCopyLink(state.item); onClose(); }}><I.link s={15} /><span>게시물 링크 복사</span></button>
+      <div className="item-context-link-actions">
+        <button role="menuitem" onClick={() => { onCopyLink(state.item); onClose(); }}><I.copy s={15} /><span>게시물 링크 복사</span></button>
+        <button className="item-context-open" role="menuitem" title="게시물 링크 열기" aria-label="게시물 링크 열기" onClick={() => { onOpenLink(state.item); onClose(); }}><I.link s={15} /></button>
+      </div>
     </div>
   );
 }
@@ -1598,7 +1647,7 @@ function Avatar({ user, s = 26 }: { user: UserRecord; s?: number }) {
   return <span className="avatar" style={{ width: s, height: s, background: avatarTone(user.nick), fontSize: s * 0.42 }}>{user.admin ? <I.shield s={s * 0.5} /> : initials(user.display || user.nick)}</span>;
 }
 
-function SubmissionBoard({ participants, items, me, admin, onDelete, onCopy, onReact, reactions, onTogglePin, dense }: { participants: UserRecord[]; items: ItemRecord[]; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; dense: boolean }) {
+function SubmissionBoard({ participants, items, me, admin, onDelete, onCopy, onReact, reactions, onTogglePin, onTaskToggle, dense }: { participants: UserRecord[]; items: ItemRecord[]; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; onTaskToggle: (itemId: string, taskIndex: number, checked: boolean) => void; dense: boolean }) {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const roster = useMemo(() => {
     return [...participants].sort((a, b) => (a.display || a.nick).localeCompare(b.display || b.nick, "ko"));
@@ -1631,12 +1680,12 @@ function SubmissionBoard({ participants, items, me, admin, onDelete, onCopy, onR
         <div className="submission-empty">아직 보드에 참가한 사용자가 없습니다.</div>
       )}
       <div className="submission-tip"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd> 텍스트, 링크, 이미지를 바로 제출할 수 있어요.</div>
-      {selectedUser && selectedItems.length > 0 && <SubmissionModal user={selectedUser} items={selectedItems} me={me} admin={admin} onClose={() => setSelectedUserId(null)} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions} onTogglePin={onTogglePin} dense={dense} />}
+      {selectedUser && selectedItems.length > 0 && <SubmissionModal user={selectedUser} items={selectedItems} me={me} admin={admin} onClose={() => setSelectedUserId(null)} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions} onTogglePin={onTogglePin} onTaskToggle={onTaskToggle} dense={dense} />}
     </section>
   );
 }
 
-function SubmissionModal({ user, items, me, admin, onClose, onDelete, onCopy, onReact, reactions, onTogglePin, dense }: { user: UserRecord; items: ItemRecord[]; me: UserRecord; admin: boolean; onClose: () => void; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; dense: boolean }) {
+function SubmissionModal({ user, items, me, admin, onClose, onDelete, onCopy, onReact, reactions, onTogglePin, onTaskToggle, dense }: { user: UserRecord; items: ItemRecord[]; me: UserRecord; admin: boolean; onClose: () => void; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; onTaskToggle: (itemId: string, taskIndex: number, checked: boolean) => void; dense: boolean }) {
   const [index, setIndex] = useState(0);
   const safeIndex = Math.min(index, items.length - 1);
   const go = useCallback((direction: number) => setIndex((current) => (current + direction + items.length) % items.length), [items.length]);
@@ -1660,7 +1709,7 @@ function SubmissionModal({ user, items, me, admin, onClose, onDelete, onCopy, on
         <header className="submission-overlay-head"><span className="submission-overlay-user"><Avatar user={user} s={32} /><span><strong>{user.display || user.nick}</strong><small>제출물</small></span></span><span className="submission-overlay-count">{safeIndex + 1} / {items.length}</span><button className="submission-overlay-close" onClick={onClose} aria-label="닫기">×</button></header>
         <div className="submission-stage">
           {items.length > 1 && <button className="submission-nav prev" onClick={() => go(-1)} aria-label="이전 제출물"><I.chevronDown s={22} /></button>}
-          <div className="submission-item"><ItemCard item={item} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[item.id] ?? {}} dense={dense} isPinned={item.pinned} onTogglePin={onTogglePin} /></div>
+          <div className="submission-item"><ItemCard item={item} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[item.id] ?? {}} dense={dense} isPinned={item.pinned} onTogglePin={onTogglePin} onTaskToggle={onTaskToggle} /></div>
           {items.length > 1 && <button className="submission-nav next" onClick={() => go(1)} aria-label="다음 제출물"><I.chevronDown s={22} /></button>}
         </div>
       </div>
@@ -1673,7 +1722,7 @@ function Placeholder({ label, h = 150 }: { label: string; h?: number }) {
   return <div className="ph" style={{ height: h }}><svg width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true"><defs><pattern id={id} width="9" height="9" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="9" height="9" fill="oklch(0.93 0.012 80)" /><line x1="0" y1="0" x2="0" y2="9" stroke="oklch(0.88 0.02 75)" strokeWidth="4" /></pattern></defs><rect width="100%" height="100%" fill={`url(#${id})`} /></svg><span className="ph-label">{label}</span></div>;
 }
 
-function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense, isNew, isPinned, onTogglePin, style }: { item: ItemRecord; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: Record<string, string[]>; dense?: boolean; isNew?: boolean; isPinned: boolean; onTogglePin: (item: ItemRecord) => void; style?: React.CSSProperties }) {
+function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense, isNew, isPinned, onTogglePin, onTaskToggle, style }: { item: ItemRecord; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: Record<string, string[]>; dense?: boolean; isNew?: boolean; isPinned: boolean; onTogglePin: (item: ItemRecord) => void; onTaskToggle: (itemId: string, taskIndex: number, checked: boolean) => void; style?: React.CSSProperties }) {
   const isPoll = item.type === "text" && POLL_FENCE_RE.test(item.body ?? "");
   const effectiveType = isPoll ? "poll" : item.type;
   const TI = effectiveType === "poll" ? I.poll : effectiveType === "link" ? I.link : effectiveType === "file" ? I.file : I.text;
@@ -1681,23 +1730,31 @@ function ItemCard({ item, me, admin, onDelete, onCopy, onReact, reactions, dense
   const mine = item.user.id === me.id;
   return (
     <article className={`card ${dense ? "dense" : ""} ${mine ? "mine" : ""} ${isNew ? "is-new" : ""}`} style={style} data-type={item.type} data-item-id={item.id} draggable={false} tabIndex={0} title={admin ? "우클릭하여 게시물 관리" : undefined}>
-      <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">관리자</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
-      <div className="card-body">{item.type === "text" && <TextBody item={item} reactions={reactions} myId={me.id} onReact={onReact} />}{item.type === "link" && item.link && <LinkBody link={item.link} />}{item.type === "file" && item.file && <FileBody file={item.file} />}</div>
+      <div className="card-head"><Avatar user={item.user} s={dense ? 22 : 26} /><span className="card-author">{item.user.display || item.user.nick}</span>{item.user.admin && <span className="badge-admin">관리자</span>}{mine && !item.user.admin && <span className="badge-me">나</span>}<span className="card-type"><TI s={12} />{{ text: "텍스트", link: "링크", file: "파일", poll: "투표" }[effectiveType]}</span><span className="card-time" title={fmtTime(item.t)}>{relTime(item.t)}</span><span className="card-actions">{admin && <button className={`ia ia-pin ${isPinned || item.pinned ? "is-pinned" : ""}`} title={item.pinned ? "고정 해제" : "상단 고정"} onClick={() => onTogglePin(item)}><I.pin s={15} /></button>}<button className="ia" title="원본 링크 열기" aria-label="원본 링크 열기" onClick={() => { const url = new URL(`/x/${encodeURIComponent(item.id)}`, window.location.origin).toString(); window.open(url, "_blank", "noopener,noreferrer"); }}><I.link s={15} /></button><button className="ia" title="복사" onClick={() => onCopy(item)}><I.copy s={15} /></button>{canDelete && <button className="ia ia-del" title="삭제" onClick={() => onDelete(item)}><I.trash s={15} /></button>}</span></div>
+      <div className="card-body">{item.type === "text" && <TextBody item={item} reactions={reactions} myId={me.id} onReact={onReact} onTaskToggle={onTaskToggle} />}{item.type === "link" && item.link && <LinkBody link={item.link} />}{item.type === "file" && item.file && <FileBody file={item.file} />}</div>
       <Reactions itemId={item.id} reactions={reactions} myId={me.id} onReact={onReact} />
     </article>
   );
 }
 
-function TextBody({ item, reactions, myId, onReact }: { item: ItemRecord; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void }) {
+function TextBody({ item, reactions, myId, onReact, onTaskToggle }: { item: ItemRecord; reactions: Record<string, string[]>; myId: string; onReact: (itemId: string, emoji: string) => void; onTaskToggle: (itemId: string, taskIndex: number, checked: boolean) => void }) {
   const body = item.body ?? "";
   const parts = body.split(POLL_FENCE_RE);
-  if (parts.length === 1) return <MarkdownPreview source={body} />;
+  if (parts.length === 1) return <MarkdownPreview source={body} onTaskToggle={(taskIndex, checked) => onTaskToggle(item.id, taskIndex, checked)} />;
   const choices = parsePollChoices(parts[1] ?? "");
-  return <div className="md">{parts[0]?.trim() && <MarkdownPreview source={parts[0]} nested />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <MarkdownPreview source={parts[2]} nested />}</div>;
+  const beforeCount = countMarkdownChecklistTasks(parts[0] ?? "");
+  return <div className="md">{parts[0]?.trim() && <MarkdownPreview source={parts[0]} onTaskToggle={(taskIndex, checked) => onTaskToggle(item.id, taskIndex, checked)} nested />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <MarkdownPreview source={parts[2]} taskIndexOffset={beforeCount} onTaskToggle={(taskIndex, checked) => onTaskToggle(item.id, taskIndex, checked)} nested />}</div>;
 }
 
-function MarkdownPreview({ source, nested = false }: { source: string; nested?: boolean }) {
+function MarkdownPreview({ source, nested = false, taskIndexOffset = 0, onTaskToggle }: { source: string; nested?: boolean; taskIndexOffset?: number; onTaskToggle?: (taskIndex: number, checked: boolean) => void }) {
   const copyCode = async (event: React.MouseEvent<HTMLDivElement>) => {
+    const checkbox = (event.target as HTMLElement).closest<HTMLInputElement>("input.md-box[data-task-index]");
+    if (checkbox && onTaskToggle) {
+      event.preventDefault();
+      const taskIndex = Number(checkbox.dataset.taskIndex);
+      if (Number.isInteger(taskIndex)) onTaskToggle(taskIndex + taskIndexOffset, checkbox.checked);
+      return;
+    }
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>(".md-copy");
     if (!button) return;
     const code = button.closest(".md-pre")?.querySelector("code")?.textContent ?? "";
@@ -1774,12 +1831,12 @@ function Reactions({ itemId, reactions, myId, onReact }: { itemId: string; react
   return <div className="rxn-row" ref={ref}>{entries.map(([emoji, ids]) => <button key={emoji} className={`rxn-pill ${ids.includes(myId) ? "mine" : ""}`} onClick={() => onReact(itemId, emoji)}><span className="rxn-em">{emoji}</span><span className="rxn-count">{ids.length}</span></button>)}<div className="rxn-add-wrap"><button className={`rxn-add ${open ? "open" : ""}`} title="리액션 추가" onClick={() => setOpen((v) => !v)}>+</button>{open && <div className="rxn-picker">{PRESET_EMOJIS.map((emoji) => <button key={emoji} className="rxn-pick-btn" onClick={() => { onReact(itemId, emoji); setOpen(false); }}>{emoji}</button>)}</div>}</div></div>;
 }
 
-function PinnedSection({ items, me, admin, onDelete, onCopy, onReact, reactions, onTogglePin, dense }: { items: ItemRecord[]; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; dense: boolean }) {
+function PinnedSection({ items, me, admin, onDelete, onCopy, onReact, reactions, onTogglePin, onTaskToggle, dense }: { items: ItemRecord[]; me: UserRecord; admin: boolean; onDelete: (item: ItemRecord) => void; onCopy: (item: ItemRecord) => void; onReact: (itemId: string, emoji: string) => void; reactions: BoardPayload["reactions"]; onTogglePin: (item: ItemRecord) => void; onTaskToggle: (itemId: string, taskIndex: number, checked: boolean) => void; dense: boolean }) {
   const [idx, setIdx] = useState(0);
   if (!items.length) return null;
   const safeIdx = Math.min(idx, items.length - 1);
   const behind = [1, 2].map((d) => items[(safeIdx + d) % items.length]).filter(Boolean).slice(0, Math.max(0, items.length - 1));
-  return <div className="pinned-section"><div className="pinned-head"><I.pin s={13} /><span className="pinned-lbl">고정된 게시물</span>{items.length > 1 && <span className="pinned-nav"><button className="pnav-btn" onClick={() => setIdx((v) => (v - 1 + items.length) % items.length)} title="이전">‹</button><span className="pnav-pos">{safeIdx + 1} / {items.length}</span><button className="pnav-btn" onClick={() => setIdx((v) => (v + 1) % items.length)} title="다음">›</button></span>}</div><div className="pinned-pile">{behind.reverse().map((item, i) => <div key={item.id} className="pinned-slot behind" style={{ "--dist": i + 1 } as React.CSSProperties}><ItemCard item={item} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[item.id] ?? {}} dense={dense} isPinned onTogglePin={onTogglePin} /></div>)}<div className="pinned-slot cur"><ItemCard item={items[safeIdx]} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[items[safeIdx].id] ?? {}} dense={dense} isPinned onTogglePin={onTogglePin} /></div></div></div>;
+  return <div className="pinned-section"><div className="pinned-head"><I.pin s={13} /><span className="pinned-lbl">고정된 게시물</span>{items.length > 1 && <span className="pinned-nav"><button className="pnav-btn" onClick={() => setIdx((v) => (v - 1 + items.length) % items.length)} title="이전">‹</button><span className="pnav-pos">{safeIdx + 1} / {items.length}</span><button className="pnav-btn" onClick={() => setIdx((v) => (v + 1) % items.length)} title="다음">›</button></span>}</div><div className="pinned-pile">{behind.reverse().map((item, i) => <div key={item.id} className="pinned-slot behind" style={{ "--dist": i + 1 } as React.CSSProperties}><ItemCard item={item} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[item.id] ?? {}} dense={dense} isPinned onTogglePin={onTogglePin} onTaskToggle={onTaskToggle} /></div>)}<div className="pinned-slot cur"><ItemCard item={items[safeIdx]} me={me} admin={admin} onDelete={onDelete} onCopy={onCopy} onReact={onReact} reactions={reactions[items[safeIdx].id] ?? {}} dense={dense} isPinned onTogglePin={onTogglePin} onTaskToggle={onTaskToggle} /></div></div></div>;
 }
 
 function EmptyState() {
