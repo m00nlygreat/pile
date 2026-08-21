@@ -594,7 +594,7 @@ export function updateChecklist(itemId: string, taskIndex: number, checked: bool
   return { ok: true as const, body };
 }
 
-export function moveItemToChannel(itemId: string, destinationChannelId: string) {
+export function moveItemToChannel(itemId: string, destinationChannelId: string, includeHidden = false) {
   const conn = getDb();
   const item = conn
     .prepare("SELECT board_id as boardId, channel FROM items WHERE id = ?")
@@ -603,8 +603,8 @@ export function moveItemToChannel(itemId: string, destinationChannelId: string) 
   if (item.channel === destinationChannelId) return { ok: false as const, reason: "same-channel" as const };
 
   const destination = conn
-    .prepare("SELECT id, slug, name FROM channels WHERE board_id = ? AND id = ? AND archived = 0 AND hidden = 0")
-    .get(item.boardId, destinationChannelId) as { id: string; slug: string; name: string } | undefined;
+    .prepare("SELECT id, slug, name FROM channels WHERE board_id = ? AND id = ? AND archived = 0 AND (? = 1 OR hidden = 0)")
+    .get(item.boardId, destinationChannelId, includeHidden ? 1 : 0) as { id: string; slug: string; name: string } | undefined;
   if (!destination) return { ok: false as const, reason: "channel-not-found" as const };
 
   conn.prepare("UPDATE items SET channel = ?, pinned = 0 WHERE id = ?").run(destination.id, itemId);

@@ -30,7 +30,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
   if (body.destinationChannelId) {
-    const result = moveItemToChannel(decodedItemId, body.destinationChannelId.trim());
+    const result = moveItemToChannel(decodedItemId, body.destinationChannelId.trim(), admin);
     if (!result.ok) {
       const message = result.reason === "same-channel"
         ? "현재 채널로는 이동할 수 없습니다."

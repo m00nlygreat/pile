@@ -867,7 +867,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
       {showParticipants && admin && <ParticipantsModal boardId={boardId} me={me2} onClose={() => setShowParticipants(false)} onKicked={(userId) => setParticipants((current) => current.filter((user) => user.id !== userId))} />}
       {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} onOpenLink={(item) => { openItemLink(item); setItemContext(null); }} />}
-      {moveTarget && <MoveChannelModal channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
+      {moveTarget && <MoveChannelModal admin={admin} channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onHide={hideChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
@@ -1061,8 +1061,8 @@ function ItemContextMenu({ admin, state, onClose, onMove, onCopyLink, onOpenLink
   );
 }
 
-function MoveChannelModal({ channels, item, onClose, onMoved }: { channels: ChannelRecord[]; item: ItemRecord; onClose: () => void; onMoved: (item: ItemRecord, destination: ChannelRecord) => void }) {
-  const destinations = channels.filter((channel) => !channel.archived && !channel.hidden && channel.id !== item.channel);
+function MoveChannelModal({ admin, channels, item, onClose, onMoved }: { admin: boolean; channels: ChannelRecord[]; item: ItemRecord; onClose: () => void; onMoved: (item: ItemRecord, destination: ChannelRecord) => void }) {
+  const destinations = channels.filter((channel) => !channel.archived && (admin || !channel.hidden) && channel.id !== item.channel);
   const [selected, setSelected] = useState(destinations[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
