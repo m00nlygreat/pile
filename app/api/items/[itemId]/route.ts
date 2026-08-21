@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteItem, isAdminRequest, moveItemToChannel, setPinned, updateChecklist } from "@/lib/db";
+import { deleteItem, isAdminRequest, isItemVisible, moveItemToChannel, setPinned, updateChecklist } from "@/lib/db";
 import { itemResponse } from "@/lib/item-response";
 
 export const runtime = "nodejs";
@@ -14,7 +14,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
   const { itemId } = await params;
   const body = (await request.json()) as { pinned?: boolean; destinationChannelId?: string; taskIndex?: number; checked?: boolean };
   const decodedItemId = decodeURIComponent(itemId);
+  const admin = await isAdminRequest();
   if (Number.isInteger(body.taskIndex) && typeof body.checked === "boolean") {
+    if (!isItemVisible(decodedItemId, admin)) {
+      return NextResponse.json({ error: "게시물을 찾을 수 없습니다." }, { status: 404 });
+    }
     const result = updateChecklist(decodedItemId, body.taskIndex as number, body.checked);
     if (!result.ok) {
       const status = result.reason === "not-found" ? 404 : 400;
@@ -22,7 +26,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     }
     return NextResponse.json(result);
   }
-  if (!(await isAdminRequest())) {
+  if (!admin) {
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
   if (body.destinationChannelId) {
@@ -45,7 +49,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const { itemId } = await params;
   const url = new URL(request.url);
   const userId = url.searchParams.get("userId") || "";
-  const result = deleteItem(decodeURIComponent(itemId), userId, await isAdminRequest());
+  const admin = await isAdminRequest();
+  const decodedItemId = decodeURIComponent(itemId);
+  if (!isItemVisible(decodedItemId, admin)) {
+    return NextResponse.json({ error: "게시물을 찾을 수 없습니다." }, { status: 404 });
+  }
+  const result = deleteItem(decodedItemId, userId, admin);
   if (!result.ok) return NextResponse.json({ error: "삭제 권한이 없습니다." }, { status: 403 });
   return NextResponse.json(result);
 }

@@ -412,7 +412,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       return;
     }
     if (channels.some((item) => item.id === channel)) return;
-    const fallback = channels[0];
+    const fallback = channels.find((item) => !item.archived && !item.hidden) ?? channels[0];
     setChannel(fallback.id);
     router.replace(channelPath(boardId, fallback));
   }, [boardId, channel, channels, router]);
@@ -625,6 +625,12 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     }
     adminSessionCache = enabled;
     setAdmin(enabled);
+    try {
+      const boardRes = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, { cache: "no-store" });
+      if (boardRes.ok) applyServerPayload((await boardRes.json()) as BoardPayload);
+    } catch {
+      // The next background sync will refresh the channel list.
+    }
     toast(enabled ? "관리자 모드 · 모든 아이템 관리 가능" : "관리자 모드를 껐어요", I.shield);
   };
   const addChannel = async (name: string) => {
@@ -642,7 +648,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   };
   const pickChannel = useCallback((next: ChannelRecord) => {
     setChannel(next.id);
-    if (!next.archived) router.push(channelPath(boardId, next));
+    if (!next.archived && !next.hidden) router.push(channelPath(boardId, next));
   }, [boardId, router]);
   const editChannel = async (target: ChannelRecord, name: string, slug: string, type: ChannelRecord["type"]) => {
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, {
@@ -677,7 +683,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     setItems((prev) => prev.filter((item) => item.channel !== target.id));
     setReactions((prev) => Object.fromEntries(Object.entries(prev).filter(([itemId]) => !removedItemIds.has(itemId))));
     if (channel === target.id) {
-      const fallback = remaining[0];
+      const fallback = remaining.find((item) => !item.archived && !item.hidden) ?? remaining[0];
       setChannel(fallback?.id ?? "");
       router.replace(fallback ? channelPath(boardId, fallback) : `/${encodeURIComponent(boardId)}`);
     }
@@ -698,7 +704,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     const payload = (await res.json()) as { archivedAt: number | null };
     setChannels((prev) => prev.map((item) => (item.id === target.id ? { ...item, archived, archivedAt: payload.archivedAt } : item)));
     if (archived && channel === target.id) {
-      const fallback = channels.find((item) => item.id !== target.id && !item.archived);
+      const fallback = channels.find((item) => item.id !== target.id && !item.archived && !item.hidden);
       if (fallback) {
         setChannel(fallback.id);
         router.push(channelPath(boardId, fallback));
@@ -706,9 +712,33 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     }
     toast(archived ? `#${target.name} 채널을 아카이브했어요` : `#${target.name} 채널을 복원했어요`, I.archive);
   };
+  const hideChannel = async (target: ChannelRecord, hidden: boolean) => {
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels/${encodeURIComponent(target.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      toast(payload?.error ?? "채널의 숨김 상태를 바꿀 수 없어요", I.eyeOff);
+      return;
+    }
+    const payload = (await res.json()) as { hiddenAt: number | null };
+    setChannels((prev) => prev.map((item) => (item.id === target.id ? { ...item, hidden, hiddenAt: payload.hiddenAt } : item)));
+    if (hidden && channel === target.id) {
+      const fallback = channels.find((item) => item.id !== target.id && !item.archived && !item.hidden);
+      if (fallback) {
+        setChannel(fallback.id);
+        router.push(channelPath(boardId, fallback));
+      }
+    } else if (!hidden && channel === target.id && !target.archived) {
+      router.push(channelPath(boardId, target));
+    }
+    toast(hidden ? `#${target.name} 채널을 숨겼어요` : `#${target.name} 채널을 다시 표시했어요`, I.eyeOff);
+  };
   const reorderChannelList = async (ordered: ChannelRecord[]) => {
     const previous = channels;
-    const positions = channels.filter((item) => !item.archived).map((item) => item.position).sort((a, b) => b - a);
+    const positions = channels.filter((item) => !item.archived && !item.hidden).map((item) => item.position).sort((a, b) => b - a);
     const positionById = new Map(ordered.map((item, index) => [item.id, positions[index]]));
     setChannels((prev) => prev.map((item) => positionById.has(item.id) ? { ...item, position: positionById.get(item.id)! } : item));
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels`, {
@@ -838,7 +868,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       {showParticipants && admin && <ParticipantsModal boardId={boardId} me={me2} onClose={() => setShowParticipants(false)} onKicked={(userId) => setParticipants((current) => current.filter((user) => user.id !== userId))} />}
       {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} onOpenLink={(item) => { openItemLink(item); setItemContext(null); }} />}
       {moveTarget && <MoveChannelModal channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
-      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
+      <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onHide={hideChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
           <PinnedSection items={pinnedItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} onTaskToggle={toggleChecklist} dense={dense} />
@@ -1032,7 +1062,7 @@ function ItemContextMenu({ admin, state, onClose, onMove, onCopyLink, onOpenLink
 }
 
 function MoveChannelModal({ channels, item, onClose, onMoved }: { channels: ChannelRecord[]; item: ItemRecord; onClose: () => void; onMoved: (item: ItemRecord, destination: ChannelRecord) => void }) {
-  const destinations = channels.filter((channel) => !channel.archived && channel.id !== item.channel);
+  const destinations = channels.filter((channel) => !channel.archived && !channel.hidden && channel.id !== item.channel);
   const [selected, setSelected] = useState(destinations[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1132,7 +1162,7 @@ const CHANNEL_REORDER_HOLD_MS = 420;
 const CHANNEL_REORDER_TOLERANCE_PX = 8;
 let lastChannelTouchTap: ChannelTouchTap | null = null;
 
-function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onArchive, onReorder, onDelete }: {
+function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onArchive, onHide, onReorder, onDelete }: {
   channels: ChannelRecord[];
   current: string;
   counts: Record<string, number>;
@@ -1141,6 +1171,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   onAdd: (name: string) => void;
   onEdit: (channel: ChannelRecord, name: string, slug: string, type: ChannelRecord["type"]) => Promise<string | null>;
   onArchive: (channel: ChannelRecord, archived: boolean) => void;
+  onHide: (channel: ChannelRecord, hidden: boolean) => void;
   onReorder: (channels: ChannelRecord[]) => void;
   onDelete: (channel: ChannelRecord) => void;
 }) {
@@ -1148,7 +1179,10 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
   const [val, setVal] = useState("");
   const [menu, setMenu] = useState<ChannelMenuState | null>(null);
   const [editing, setEditing] = useState<ChannelRecord | null>(null);
-  const [openedArchivedId, setOpenedArchivedId] = useState<string | null>(null);
+  const [openedArchivedId, setOpenedArchivedId] = useState<string | null>(() => {
+    const selected = channels.find((channel) => channel.id === current);
+    return selected && (selected.archived || (admin && selected.hidden)) ? selected.id : null;
+  });
   const [activeId, setActiveId] = useState<string | null>(null);
   const suppressClickTimer = useRef(0);
   const touchTapStart = useRef<ChannelTouchStart | null>(null);
@@ -1167,9 +1201,13 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
     }),
   );
   const archivedChannels = channels
-    .filter((channel) => channel.archived)
-    .sort((a, b) => (b.archivedAt ?? b.position) - (a.archivedAt ?? a.position));
-  const normalChannels = channels.filter((channel) => !channel.archived).sort((a, b) => b.position - a.position);
+    .filter((channel) => channel.archived || (admin && channel.hidden))
+    .sort((a, b) => Math.max(b.archivedAt ?? 0, b.hiddenAt ?? 0, b.position) - Math.max(a.archivedAt ?? 0, a.hiddenAt ?? 0, a.position));
+  const normalChannels = channels.filter((channel) => !channel.archived && !channel.hidden).sort((a, b) => b.position - a.position);
+  useEffect(() => {
+    const selected = channels.find((channel) => channel.id === current);
+    setOpenedArchivedId(selected && (selected.archived || (admin && selected.hidden)) ? selected.id : null);
+  }, [admin, channels, current]);
   const activeChannel = activeId ? normalChannels.find((channel) => channel.id === activeId) : null;
   const handleDragStart = ({ active }: DragStartEvent) => {
     touchTapStart.current = null;
@@ -1197,12 +1235,16 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
     setVal("");
     setAdding(false);
   };
+  const handleHide = (channel: ChannelRecord, hidden: boolean) => {
+    if (hidden && channel.id === current) setOpenedArchivedId(null);
+    onHide(channel, hidden);
+  };
   const openMenu = (channel: ChannelRecord, x: number, y: number) => {
     if (!admin) return;
     setMenu({
       channel,
       x: Math.max(8, Math.min(x, window.innerWidth - 184)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 188)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 228)),
     });
   };
   const startTouchTap = (channel: ChannelRecord, event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1319,7 +1361,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
               />
             ))}
           </SortableContext>
-          {channels.filter((channel) => channel.archived && channel.id === openedArchivedId).map((channel) => (
+          {channels.filter((channel) => channel.id === openedArchivedId && (channel.archived || (admin && channel.hidden))).map((channel) => (
             <button
               key={channel.id}
               className={`chip ${channel.type === "submission" ? "is-submission" : ""} ${current === channel.id ? "on" : ""}`}
@@ -1366,7 +1408,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
         </div>
       {archivedChannels.length > 0 && (
         <details ref={archiveDetailsRef} className="archive-dropdown">
-          <summary aria-label={`아카이브된 채널 ${archivedChannels.length}개`}>
+          <summary aria-label={`보관된 채널 ${archivedChannels.length}개`}>
             <I.archive s={14} />
             <span className="archive-label">아카이브</span>
             <span className="archive-count">{archivedChannels.length}</span>
@@ -1379,8 +1421,9 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
                 archiveDetailsRef.current?.removeAttribute("open");
                 onPick(channel);
               }}>
-                {channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
+                {channel.hidden ? <I.eyeOff s={13} /> : channel.type === "submission" ? <I.clip s={13} /> : <I.hash s={13} />}
                 <span>{channel.name}</span>
+                {channel.hidden ? <small className="archive-kind">숨김</small> : null}
                 {counts[channel.id] ? <small>{counts[channel.id]}</small> : null}
               </button>
             ))}
@@ -1391,6 +1434,7 @@ function Channels({ channels, current, counts, admin, onPick, onAdd, onEdit, onA
         <div ref={menuRef} className="channel-menu" role="menu" aria-label={`${menu.channel.name} 채널 관리`} style={{ left: menu.x, top: menu.y }}>
           <button role="menuitem" onClick={() => { setEditing(menu.channel); setMenu(null); }}><I.edit s={14} />채널 수정</button>
           <button role="menuitem" onClick={() => { const target = menu.channel; setMenu(null); onArchive(target, !target.archived); }}><I.archive s={14} />{menu.channel.archived ? "언아카이브" : "아카이브"}</button>
+          <button role="menuitem" onClick={() => { const target = menu.channel; setMenu(null); handleHide(target, !target.hidden); }}><I.eyeOff s={14} />{menu.channel.hidden ? "숨김 해제" : "채널 숨기기"}</button>
           <button className="danger" role="menuitem" onClick={() => { const target = menu.channel; setMenu(null); onDelete(target); }}><I.trash s={14} />채널 삭제</button>
         </div>
       )}

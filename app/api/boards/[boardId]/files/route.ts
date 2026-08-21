@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createItem, defaultChannelExists, wasBoardUserRemoved } from "@/lib/db";
+import { createItem, defaultChannelExists, isAdminRequest, wasBoardUserRemoved } from "@/lib/db";
 import { deleteStoredFile, saveStoredFile } from "@/lib/file-storage";
 import type { UserRecord } from "@/lib/types";
 
@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
   const channel = String(form.get("channel") || "default");
   const user = parseUser(form.get("user"));
 
-  if (!defaultChannelExists(boardId, channel)) {
+  if (!defaultChannelExists(boardId, channel, await isAdminRequest())) {
     return NextResponse.json({ error: "존재하지 않는 채널입니다." }, { status: 400 });
   }
   if (!user) {

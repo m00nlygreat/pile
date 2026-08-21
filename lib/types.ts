@@ -17,6 +17,8 @@ export type ChannelRecord = {
   type: "standard" | "submission";
   archived: boolean;
   archivedAt: number | null;
+  hidden: boolean;
+  hiddenAt: number | null;
 };
 
 export type LinkPayload = {

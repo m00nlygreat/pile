@@ -66,6 +66,13 @@ export const I = {
     </Icon>
   ),
   shield: (p: IconProps) => <Icon {...p} d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" />,
+  eyeOff: (p: IconProps) => (
+    <Icon {...p}>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
+      <path d="M6.7 6.7C4.6 8 3.1 9.8 2.2 12c1.4 3.2 4.9 6 9.8 6 1.4 0 2.7-.3 3.8-.8M17.3 17.3c2.1-1.3 3.6-3.1 4.5-5.3-1.4-3.2-4.9-6-9.8-6-1 0-2 .1-2.9.4" />
+    </Icon>
+  ),
   hash: (p: IconProps) => <Icon {...p} d="M6 9h14M5 15h14M10 4L8 20M16 4l-2 16" />,
   share: (p: IconProps) => (
     <Icon {...p}>

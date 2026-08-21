@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getItemSource } from "@/lib/db";
+import { getItemSource, isAdminRequest } from "@/lib/db";
 import { storedFileResponse } from "@/lib/stored-file-response";
 
 function notFound() {
@@ -7,7 +7,7 @@ function notFound() {
 }
 
 export async function itemResponse(request: Request, itemId: string) {
-  const item = getItemSource(itemId);
+  const item = getItemSource(itemId, await isAdminRequest());
   if (!item) return notFound();
 
   if (item.type === "text") {

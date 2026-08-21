@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBoardPayload, toggleReaction } from "@/lib/db";
+import { getBoardPayload, isAdminRequest, isItemVisible, toggleReaction } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +10,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ ite
   if (!body.emoji || !body.userId) {
     return NextResponse.json({ error: "emoji와 userId가 필요합니다." }, { status: 400 });
   }
-  toggleReaction(decodeURIComponent(itemId), body.emoji, body.userId);
-  if (body.boardId) return NextResponse.json({ reactions: getBoardPayload(body.boardId).reactions });
+  const admin = await isAdminRequest();
+  const decodedItemId = decodeURIComponent(itemId);
+  if (!isItemVisible(decodedItemId, admin)) {
+    return NextResponse.json({ error: "게시물을 찾을 수 없습니다." }, { status: 404 });
+  }
+  toggleReaction(decodedItemId, body.emoji, body.userId);
+  if (body.boardId) return NextResponse.json({ reactions: getBoardPayload(body.boardId, admin).reactions });
   return NextResponse.json({ ok: true });
 }

@@ -36,6 +36,8 @@ function getDb() {
         type TEXT NOT NULL DEFAULT 'standard',
         archived INTEGER NOT NULL DEFAULT 0,
         archived_at INTEGER,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        hidden_at INTEGER,
         position INTEGER NOT NULL,
         PRIMARY KEY (board_id, id)
       );
@@ -77,6 +79,7 @@ function getDb() {
     migrateChannelSlugs(db);
     migrateChannelTypes(db);
     migrateChannelArchived(db);
+    migrateChannelHidden(db);
     migrateUserProfiles(db);
   }
   return db;
@@ -132,6 +135,16 @@ function migrateChannelArchived(conn: DatabaseSync) {
   }
 }
 
+function migrateChannelHidden(conn: DatabaseSync) {
+  const columns = conn.prepare("PRAGMA table_info(channels)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "hidden")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!columns.some((column) => column.name === "hidden_at")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN hidden_at INTEGER");
+  }
+}
+
 function migrateUserProfiles(conn: DatabaseSync) {
   const columns = conn.prepare("PRAGMA table_info(items)").all() as { name: string }[];
   if (!columns.some((column) => column.name === "user_id")) {
@@ -167,6 +180,34 @@ function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+type ChannelRow = {
+  id: string;
+  boardId: string;
+  slug: string;
+  name: string;
+  type: string;
+  archived: number;
+  archivedAt: number | null;
+  hidden: number;
+  hiddenAt: number | null;
+  position: number;
+};
+
+function channelRecord(row: ChannelRow): ChannelRecord {
+  return {
+    id: String(row.id),
+    boardId: String(row.boardId),
+    slug: String(row.slug),
+    name: String(row.name),
+    type: row.type === "submission" ? "submission" : "standard",
+    archived: Boolean(row.archived),
+    archivedAt: row.archivedAt == null ? null : Number(row.archivedAt),
+    hidden: Boolean(row.hidden),
+    hiddenAt: row.hiddenAt == null ? null : Number(row.hiddenAt),
+    position: Number(row.position),
+  };
+}
+
 export async function isAdminRequest() {
   const jar = await cookies();
   return jar.get("pile_admin")?.value === "1";
@@ -188,8 +229,19 @@ export function ensureBoard(boardId: string) {
   const exists = conn.prepare("SELECT id FROM boards WHERE id = ?").get(boardId);
   if (exists) return;
   conn.prepare("INSERT INTO boards (id, display_name, created_at) VALUES (?, ?, ?)").run(boardId, boardId, Date.now());
-  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-  seedChannels(boardId).forEach((channel) => insertChannel.run(channel.id, channel.boardId, channel.slug, channel.name, channel.type, channel.archived ? 1 : 0, channel.archivedAt, channel.position));
+  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, hidden, hidden_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  seedChannels(boardId).forEach((channel) => insertChannel.run(
+    channel.id,
+    channel.boardId,
+    channel.slug,
+    channel.name,
+    channel.type,
+    channel.archived ? 1 : 0,
+    channel.archivedAt,
+    channel.hidden ? 1 : 0,
+    channel.hiddenAt,
+    channel.position,
+  ));
 }
 
 function boardExists(boardId: string) {
@@ -237,7 +289,7 @@ export function deleteBoard(boardId: string) {
   return { ok: true as const, deleted: true, deletedItems: itemRows.length };
 }
 
-export function getBoardPayload(boardId: string): BoardPayload {
+export function getBoardPayload(boardId: string, includeHidden = false): BoardPayload {
   const conn = getDb();
   const boardRow = conn.prepare("SELECT id, display_name as displayName FROM boards WHERE id = ?").get(boardId) as
     | { id: string; displayName: string }
@@ -247,21 +299,15 @@ export function getBoardPayload(boardId: string): BoardPayload {
   }
   const board = boardRow ? { id: String(boardRow.id), displayName: String(boardRow.displayName) } : undefined;
   const channelRows = conn
-    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, position FROM channels WHERE board_id = ? ORDER BY position ASC")
-    .all(boardId) as unknown as (Omit<ChannelRecord, "archived"> & { archived: number })[];
-  const channels: ChannelRecord[] = channelRows.map((row) => ({
-    id: String(row.id),
-    boardId: String(row.boardId),
-    slug: String(row.slug),
-    name: String(row.name),
-    type: row.type === "submission" ? "submission" : "standard",
-    archived: Boolean(row.archived),
-    archivedAt: row.archivedAt == null ? null : Number(row.archivedAt),
-    position: Number(row.position),
-  }));
+    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? ORDER BY position ASC")
+    .all(boardId) as unknown as ChannelRow[];
+  const allChannels = channelRows.map(channelRecord);
+  const channels = includeHidden ? allChannels : allChannels.filter((channel) => !channel.hidden);
+  const visibleChannelIds = new Set(channels.map((channel) => channel.id));
   const itemRows = conn
     .prepare("SELECT * FROM items WHERE board_id = ? ORDER BY t DESC")
-    .all(boardId) as Record<string, unknown>[];
+    .all(boardId)
+    .filter((row: unknown) => includeHidden || visibleChannelIds.has(String((row as Record<string, unknown>).channel))) as Record<string, unknown>[];
   const userRows = conn
     .prepare("SELECT user_id as userId, nick, display, updated_at as updatedAt FROM board_users WHERE board_id = ?")
     .all(boardId) as { userId: string; nick: string; display: string; updatedAt: number }[];
@@ -296,8 +342,10 @@ export function getBoardPayload(boardId: string): BoardPayload {
   const reactionRows = conn
     .prepare("SELECT item_id as itemId, emoji, user_id as userId FROM reactions WHERE item_id IN (SELECT id FROM items WHERE board_id = ?)")
     .all(boardId) as { itemId: string; emoji: string; userId: string }[];
+  const visibleItemIds = new Set(items.map((item) => item.id));
   const reactions: BoardPayload["reactions"] = {};
   reactionRows.forEach((row) => {
+    if (!visibleItemIds.has(String(row.itemId))) return;
     reactions[row.itemId] ??= {};
     reactions[row.itemId][row.emoji] ??= [];
     reactions[row.itemId][row.emoji].push(row.userId);
@@ -311,13 +359,26 @@ export function createChannel(boardId: string, name: string, type: ChannelRecord
   const maxRow = conn.prepare("SELECT COALESCE(MAX(position), -1) as maxPos FROM channels WHERE board_id = ?").get(boardId) as { maxPos: number };
   const existing = conn.prepare("SELECT slug FROM channels WHERE board_id = ?").all(boardId) as { slug: string }[];
   const slug = uniqueSlug(slugFromChannelName(name), existing.map((channel) => channel.slug));
-  const channel = { id: uid("ch"), boardId, slug, name, type, archived: false, archivedAt: null, position: maxRow.maxPos + 1 };
-  conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+  const channel = {
+    id: uid("ch"),
+    boardId,
+    slug,
+    name,
+    type,
+    archived: false,
+    archivedAt: null,
+    hidden: false,
+    hiddenAt: null,
+    position: maxRow.maxPos + 1,
+  };
+  conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, hidden, hidden_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     channel.id,
     channel.boardId,
     channel.slug,
     channel.name,
     channel.type,
+    0,
+    null,
     0,
     null,
     channel.position,
@@ -329,7 +390,7 @@ export function reorderChannels(boardId: string, channelIds: string[]) {
   ensureBoard(boardId);
   const conn = getDb();
   const rows = conn
-    .prepare("SELECT id, position FROM channels WHERE board_id = ? AND archived = 0 ORDER BY position DESC")
+    .prepare("SELECT id, position FROM channels WHERE board_id = ? AND archived = 0 AND hidden = 0 ORDER BY position DESC")
     .all(boardId) as { id: string; position: number }[];
   const currentIds = rows.map((row) => String(row.id));
   if (channelIds.length !== currentIds.length || new Set(channelIds).size !== channelIds.length || channelIds.some((id) => !currentIds.includes(id))) {
@@ -352,8 +413,8 @@ export function updateChannel(boardId: string, channelId: string, name: string, 
   ensureBoard(boardId);
   const conn = getDb();
   const current = conn
-    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, position FROM channels WHERE board_id = ? AND id = ?")
-    .get(boardId, channelId) as ChannelRecord | undefined;
+    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? AND id = ?")
+    .get(boardId, channelId) as ChannelRow | undefined;
   if (!current) return { ok: false as const, reason: "not-found" as const };
 
   const duplicate = conn
@@ -364,16 +425,7 @@ export function updateChannel(boardId: string, channelId: string, name: string, 
   conn.prepare("UPDATE channels SET name = ?, slug = ? WHERE board_id = ? AND id = ?").run(name, slug, boardId, channelId);
   return {
     ok: true as const,
-    channel: {
-      id: String(current.id),
-      boardId: String(current.boardId),
-      slug,
-      name,
-      type: current.type === "submission" ? "submission" as const : "standard" as const,
-      archived: Boolean(current.archived),
-      archivedAt: current.archivedAt == null ? null : Number(current.archivedAt),
-      position: Number(current.position),
-    },
+    channel: channelRecord({ ...current, slug, name }),
   };
 }
 
@@ -393,6 +445,15 @@ export function setChannelArchived(boardId: string, channelId: string, archived:
   const result = conn.prepare("UPDATE channels SET archived = ?, archived_at = ? WHERE board_id = ? AND id = ?").run(archived ? 1 : 0, archivedAt, boardId, channelId);
   if (result.changes === 0) return { ok: false as const, reason: "not-found" as const };
   return { ok: true as const, archivedAt };
+}
+
+export function setChannelHidden(boardId: string, channelId: string, hidden: boolean) {
+  ensureBoard(boardId);
+  const conn = getDb();
+  const hiddenAt = hidden ? Date.now() : null;
+  const result = conn.prepare("UPDATE channels SET hidden = ?, hidden_at = ? WHERE board_id = ? AND id = ?").run(hidden ? 1 : 0, hiddenAt, boardId, channelId);
+  if (result.changes === 0) return { ok: false as const, reason: "not-found" as const };
+  return { ok: true as const, hiddenAt };
 }
 
 export function deleteChannel(boardId: string, channelId: string) {
@@ -426,24 +487,15 @@ export function channelSlugExists(boardId: string, channelSlug: string) {
   return Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND slug = ?").get(boardId, channelSlug));
 }
 
-export function getChannelBySlug(boardId: string, channelSlug: string) {
+export function getChannelBySlug(boardId: string, channelSlug: string, includeHidden = false) {
   if (!boardExists(boardId)) {
     return seedChannels(boardId).find((channel) => channel.slug === channelSlug);
   }
   const row = getDb()
-    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, position FROM channels WHERE board_id = ? AND slug = ?")
-    .get(boardId, channelSlug) as ChannelRecord | undefined;
-  if (!row) return undefined;
-  return {
-    id: String(row.id),
-    boardId: String(row.boardId),
-    slug: String(row.slug),
-    name: String(row.name),
-    type: row.type === "submission" ? "submission" as const : "standard" as const,
-    archived: Boolean(row.archived),
-    archivedAt: row.archivedAt == null ? null : Number(row.archivedAt),
-    position: Number(row.position),
-  };
+    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? AND slug = ?")
+    .get(boardId, channelSlug) as ChannelRow | undefined;
+  if (!row || (!includeHidden && Boolean(row.hidden))) return undefined;
+  return channelRecord(row);
 }
 
 export function upsertBoardUser(boardId: string, user: UserRecord) {
@@ -551,7 +603,7 @@ export function moveItemToChannel(itemId: string, destinationChannelId: string) 
   if (item.channel === destinationChannelId) return { ok: false as const, reason: "same-channel" as const };
 
   const destination = conn
-    .prepare("SELECT id, slug, name FROM channels WHERE board_id = ? AND id = ? AND archived = 0")
+    .prepare("SELECT id, slug, name FROM channels WHERE board_id = ? AND id = ? AND archived = 0 AND hidden = 0")
     .get(item.boardId, destinationChannelId) as { id: string; slug: string; name: string } | undefined;
   if (!destination) return { ok: false as const, reason: "channel-not-found" as const };
 
@@ -575,15 +627,23 @@ export function deleteItem(itemId: string, userId: string, admin: boolean) {
   return { ok: true, deleted: true };
 }
 
-export function getItemFile(itemId: string) {
-  const row = getDb().prepare("SELECT file_json FROM items WHERE id = ? AND type = 'file'").get(itemId) as { file_json: string | null } | undefined;
+export function getItemFile(itemId: string, includeHidden = false) {
+  const row = getDb()
+    .prepare("SELECT items.file_json FROM items JOIN channels ON channels.board_id = items.board_id AND channels.id = items.channel WHERE items.id = ? AND items.type = 'file' AND (? = 1 OR channels.hidden = 0)")
+    .get(itemId, includeHidden ? 1 : 0) as { file_json: string | null } | undefined;
   return row?.file_json ? tryJson<FilePayload>(row.file_json) : null;
 }
 
-export function getItemSource(itemId: string) {
+export function isItemVisible(itemId: string, includeHidden = false) {
+  return Boolean(getDb()
+    .prepare("SELECT 1 FROM items JOIN channels ON channels.board_id = items.board_id AND channels.id = items.channel WHERE items.id = ? AND (? = 1 OR channels.hidden = 0)")
+    .get(itemId, includeHidden ? 1 : 0));
+}
+
+export function getItemSource(itemId: string, includeHidden = false) {
   const row = getDb()
-    .prepare("SELECT type, body, link_json, file_json FROM items WHERE id = ?")
-    .get(itemId) as { type: string; body: string | null; link_json: string | null; file_json: string | null } | undefined;
+    .prepare("SELECT items.type, items.body, items.link_json, items.file_json FROM items JOIN channels ON channels.board_id = items.board_id AND channels.id = items.channel WHERE items.id = ? AND (? = 1 OR channels.hidden = 0)")
+    .get(itemId, includeHidden ? 1 : 0) as { type: string; body: string | null; link_json: string | null; file_json: string | null } | undefined;
   if (!row) return null;
   return {
     type: row.type as ItemRecord["type"],
@@ -609,9 +669,11 @@ export function toggleReaction(itemId: string, emoji: string, userId: string) {
   }
 }
 
-export function defaultChannelExists(boardId: string, channelId: string) {
+export function defaultChannelExists(boardId: string, channelId: string, includeHidden = false) {
   if (!boardExists(boardId)) {
     return DEFAULT_CHANNELS.some((channel) => channel.id === channelId);
   }
-  return Boolean(getDb().prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ?").get(boardId, channelId));
+  return Boolean(getDb()
+    .prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ? AND (? = 1 OR hidden = 0)")
+    .get(boardId, channelId, includeHidden ? 1 : 0));
 }

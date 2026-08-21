@@ -275,6 +275,7 @@ kbd {
 .archive-dropdown-menu button:hover, .archive-dropdown-menu button:focus-visible { color: var(--ink); background: var(--surface-2); outline: none; }
 .archive-dropdown-menu button > span { overflow: hidden; flex: 1 1 auto; text-overflow: ellipsis; white-space: nowrap; }
 .archive-dropdown-menu button > small { color: var(--faint); font-family: var(--mono); font-size: 10px; }
+.archive-dropdown-menu button > small.archive-kind { margin-left: auto; color: var(--accent-ink); }
 
 .feed { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
 .feed-inner {

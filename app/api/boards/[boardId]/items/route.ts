@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createItem, defaultChannelExists, wasBoardUserRemoved } from "@/lib/db";
+import { createItem, defaultChannelExists, isAdminRequest, wasBoardUserRemoved } from "@/lib/db";
 import { enrichLink } from "@/lib/link-meta";
 import type { FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boa
     file?: FilePayload;
   };
   const channel = body.channel || "default";
-  if (!defaultChannelExists(boardId, channel)) {
+  if (!defaultChannelExists(boardId, channel, await isAdminRequest())) {
     return NextResponse.json({ error: "존재하지 않는 채널입니다." }, { status: 400 });
   }
   if (!body.type || !["text", "link", "file"].includes(body.type)) {
