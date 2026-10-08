@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { getItemSource, isAdminRequest } from "@/lib/db";
+import { getChannelForShortcut, getItemSource, getLatestItemId, isAdminRequest } from "@/lib/db";
 import { storedFileResponse } from "@/lib/stored-file-response";
 
 function notFound() {
   return NextResponse.json({ error: "게시물을 찾을 수 없습니다." }, { status: 404 });
 }
 
-export async function itemResponse(request: Request, itemId: string) {
-  const item = getItemSource(itemId, await isAdminRequest());
+export async function itemResponse(request: Request, itemId: string, includeHidden?: boolean) {
+  const item = getItemSource(itemId, includeHidden ?? await isAdminRequest());
   if (!item) return notFound();
 
   if (item.type === "text") {
@@ -27,4 +27,15 @@ export async function itemResponse(request: Request, itemId: string) {
   }
   if (item.type === "file") return storedFileResponse(request, itemId, item.file);
   return notFound();
+}
+
+export async function latestChannelItemResponse(request: Request, boardId: string, channelSlug?: string) {
+  const includeHidden = await isAdminRequest();
+  const channel = getChannelForShortcut(boardId, channelSlug, includeHidden);
+  if (!channel) return notFound();
+
+  const itemId = getLatestItemId(boardId, channel.id, includeHidden);
+  if (!itemId) return notFound();
+
+  return itemResponse(request, itemId, includeHidden);
 }

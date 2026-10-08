@@ -37,7 +37,7 @@ let adminSessionRequest: Promise<boolean> | null = null;
 
 type Toast = { id: string; msg: string; Icon?: (p: { s?: number }) => ReactElement };
 type ItemContextState = { item: ItemRecord; x: number; y: number };
-type ShortcutOperation = "copy" | "paste";
+type ShortcutOperation = "paste";
 type ShortcutState = "idle" | "running" | "blocked" | "empty" | "done";
 type FileSubmissionResult = { posted: number; total: number };
 type Peer = { name: string; color: string; x: number; docY: number };
@@ -396,7 +396,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const dragDepth = useRef(0);
   const shortcutHandled = useRef<string | null>(null);
   const shortcutRunning = useRef(false);
-  const shortcutAction = useRef<(operation: ShortcutOperation) => Promise<void>>(async () => undefined);
+  const shortcutAction = useRef<() => Promise<void>>(async () => undefined);
 
   const displayMe = me ?? { id: "", nick: "익명", display: "익명", admin: false };
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
@@ -811,10 +811,10 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         });
         await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
         toast("이미지를 클립보드에 복사했어요", I.copy);
-        return true;
+        return;
       } catch {
         toast("이미지를 복사할 수 없어요", I.copy);
-        return false;
+        return;
       }
     }
     const text = item.type === "text" ? item.body ?? "" : item.type === "link" ? item.link?.url ?? "" : item.file?.name ?? "";
@@ -822,32 +822,15 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       if (!navigator.clipboard?.writeText) throw new Error("Text clipboard is not supported");
       await navigator.clipboard.writeText(text);
       toast("클립보드에 복사했어요", I.copy);
-      return true;
     } catch {
       toast("클립보드에 복사할 수 없어요", I.copy);
-      return false;
     }
   };
-  const runShortcut = async (operation: ShortcutOperation) => {
+  const runShortcut = async () => {
     if (shortcutRunning.current) return;
     shortcutRunning.current = true;
     setShortcutState("running");
     try {
-      if (operation === "copy") {
-        const latest = channelItems[0];
-        if (!latest) {
-          setShortcutState("empty");
-          return;
-        }
-        if (await copyItem(latest)) {
-          setShortcutState("done");
-          if (currentChannel) router.replace(channelPath(boardId, currentChannel));
-        } else {
-          setShortcutState("blocked");
-        }
-        return;
-      }
-
       let payload: Awaited<ReturnType<typeof readClipboardPayload>>;
       try {
         payload = await readClipboardPayload();
@@ -897,7 +880,7 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     const runKey = `${boardId}:${channel}:${initialShortcut}`;
     if (shortcutHandled.current === runKey) return;
     shortcutHandled.current = runKey;
-    void shortcutAction.current(initialShortcut);
+    void shortcutAction.current();
   }, [boardId, channel, initialShortcut, me]);
 
   const copyItemLink = async (item: ItemRecord) => {
@@ -971,19 +954,17 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         <div className="shortcut-action" role="status" aria-live="polite">
           <span>
             {shortcutState === "running"
-              ? initialShortcut === "copy" ? "최신 게시물을 클립보드에 복사하는 중…" : "클립보드 내용을 게시하는 중…"
+              ? "클립보드 내용을 게시하는 중…"
               : shortcutState === "empty"
-                ? initialShortcut === "copy" ? "복사할 게시물이 없습니다." : "클립보드에 게시할 텍스트나 파일이 없습니다."
-                : initialShortcut === "copy"
-                  ? "자동 복사가 차단됐어요. 버튼을 눌러 다시 시도하세요."
-                  : "자동 읽기가 차단됐어요. 버튼을 눌러 다시 시도하거나 Ctrl+V를 누르세요."}
+                ? "클립보드에 게시할 텍스트나 파일이 없습니다."
+                : "자동 읽기가 차단됐어요. 버튼을 눌러 다시 시도하거나 Ctrl+V를 누르세요."}
           </span>
           <button
             className="btn-pri"
-            onClick={() => void runShortcut(initialShortcut)}
-            disabled={shortcutState === "running" || (initialShortcut === "copy" && channelItems.length === 0)}
+            onClick={() => void runShortcut()}
+            disabled={shortcutState === "running"}
           >
-            {shortcutState === "running" ? "처리 중…" : initialShortcut === "copy" ? "다시 복사" : "클립보드에서 게시"}
+            {shortcutState === "running" ? "처리 중…" : "클립보드에서 게시"}
           </button>
         </div>
       )}

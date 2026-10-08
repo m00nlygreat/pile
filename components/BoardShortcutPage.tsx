@@ -4,7 +4,7 @@ import { getBoardPayload, isAdminRequest } from "@/lib/db";
 
 type BoardShortcutPageProps = {
   params: Promise<{ boardId: string; channelId?: string }>;
-  operation: "copy" | "paste";
+  operation: "paste";
 };
 
 export default async function BoardShortcutPage({ params, operation }: BoardShortcutPageProps) {

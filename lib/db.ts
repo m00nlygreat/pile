@@ -499,6 +499,29 @@ export function getChannelBySlug(boardId: string, channelSlug: string, includeHi
   return channelRecord(row);
 }
 
+export function getChannelForShortcut(boardId: string, channelSlug?: string, includeHidden = false) {
+  if (!boardExists(boardId)) {
+    const channels = seedChannels(boardId);
+    return channelSlug
+      ? channels.find((channel) => channel.slug === channelSlug)
+      : channels.find((channel) => channel.id === "default") ?? channels[0];
+  }
+
+  const visibleFilter = includeHidden ? "" : "AND hidden = 0";
+  const select = "SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels";
+  const row = channelSlug
+    ? getDb().prepare(`${select} WHERE board_id = ? AND slug = ? ${visibleFilter}`).get(boardId, channelSlug) as ChannelRow | undefined
+    : getDb().prepare(`${select} WHERE board_id = ? ${visibleFilter} ORDER BY CASE WHEN id = 'default' THEN 0 ELSE 1 END, position ASC LIMIT 1`).get(boardId) as ChannelRow | undefined;
+  return row ? channelRecord(row) : undefined;
+}
+
+export function getLatestItemId(boardId: string, channelId: string, includeHidden = false) {
+  const row = getDb()
+    .prepare("SELECT items.id FROM items JOIN channels ON channels.board_id = items.board_id AND channels.id = items.channel WHERE items.board_id = ? AND items.channel = ? AND (? = 1 OR channels.hidden = 0) ORDER BY items.t DESC, items.rowid DESC LIMIT 1")
+    .get(boardId, channelId, includeHidden ? 1 : 0) as { id: string } | undefined;
+  return row ? String(row.id) : undefined;
+}
+
 export function upsertBoardUser(boardId: string, user: UserRecord) {
   const nick = user.nick || user.display || "익명";
   const display = user.display || nick;
