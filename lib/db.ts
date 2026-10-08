@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
 import { deleteStoredFileSync } from "@/lib/file-storage";
 import { toggleMarkdownChecklist } from "@/lib/markdown-checklist";
-import { slugFromChannelName, uniqueSlug } from "@/lib/slug";
+import { isReservedChannelSlug, slugFromChannelName, uniqueSlug } from "@/lib/slug";
 import type { BoardPayload, BoardSummary, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 const DB_PATH = process.env.PILE_DB_PATH || join(process.cwd(), "data", "pile.sqlite");
@@ -108,7 +108,7 @@ function migrateChannelSlugs(conn: DatabaseSync) {
   const usedByBoard = new Map<string, Set<string>>();
   const update = conn.prepare("UPDATE channels SET slug = ? WHERE board_id = ? AND id = ?");
   rows.forEach((row) => {
-    const used = usedByBoard.get(row.boardId) ?? new Set<string>();
+    const used = usedByBoard.get(row.boardId) ?? new Set(["c", "p"]);
     usedByBoard.set(row.boardId, used);
     const base = row.id === "default" ? "default" : slugFromChannelName(row.name);
     const current = row.slug?.trim();
@@ -416,6 +416,7 @@ export function updateChannel(boardId: string, channelId: string, name: string, 
     .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? AND id = ?")
     .get(boardId, channelId) as ChannelRow | undefined;
   if (!current) return { ok: false as const, reason: "not-found" as const };
+  if (isReservedChannelSlug(slug)) return { ok: false as const, reason: "reserved-slug" as const };
 
   const duplicate = conn
     .prepare("SELECT 1 FROM channels WHERE board_id = ? AND lower(slug) = lower(?) AND id <> ?")

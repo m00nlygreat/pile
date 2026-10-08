@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteChannel, isAdminRequest, setChannelArchived, setChannelHidden, setChannelType, updateChannel } from "@/lib/db";
-import { isValidChannelSlug } from "@/lib/slug";
+import { isReservedChannelSlug, isValidChannelSlug } from "@/lib/slug";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,9 +31,15 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if (!slug || !isValidChannelSlug(slug)) {
     return NextResponse.json({ error: "slug는 영문 소문자, 숫자, 하이픈만 사용할 수 있습니다." }, { status: 400 });
   }
+  if (isReservedChannelSlug(slug)) {
+    return NextResponse.json({ error: "c와 p는 예약된 slug입니다." }, { status: 400 });
+  }
 
   const result = updateChannel(boardId, channelId, name, slug);
   if (!result.ok) {
+    if (result.reason === "reserved-slug") {
+      return NextResponse.json({ error: "c와 p는 예약된 slug입니다." }, { status: 400 });
+    }
     if (result.reason === "duplicate-slug") {
       return NextResponse.json({ error: "이미 사용 중인 slug입니다." }, { status: 409 });
     }

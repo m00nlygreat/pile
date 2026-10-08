@@ -37,6 +37,9 @@ let adminSessionRequest: Promise<boolean> | null = null;
 
 type Toast = { id: string; msg: string; Icon?: (p: { s?: number }) => ReactElement };
 type ItemContextState = { item: ItemRecord; x: number; y: number };
+type ShortcutOperation = "copy" | "paste";
+type ShortcutState = "idle" | "running" | "blocked" | "empty" | "done";
+type FileSubmissionResult = { posted: number; total: number };
 type Peer = { name: string; color: string; x: number; docY: number };
 type TrysteroAction = { send: (...args: unknown[]) => void; onMessage?: unknown };
 type TrysteroRoom = {
@@ -371,7 +374,7 @@ function channelPath(boardId: string, channel: Pick<ChannelRecord, "id" | "slug"
   return channel.id === "default" ? boardPath : `${boardPath}/${encodeURIComponent(channel.slug)}`;
 }
 
-export function PileBoard({ boardId, initialChannelSlug = "default", initialData }: { boardId: string; initialChannelSlug?: string; initialData: BoardPayload }) {
+export function PileBoard({ boardId, initialChannelSlug = "default", initialData, initialShortcut }: { boardId: string; initialChannelSlug?: string; initialData: BoardPayload; initialShortcut?: ShortcutOperation }) {
   const router = useRouter();
   const [channels, setChannels] = useState(initialData.channels);
   const [participants, setParticipants] = useState(initialData.users);
@@ -388,8 +391,12 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   const [moveTarget, setMoveTarget] = useState<ItemRecord | null>(null);
   const [itemContext, setItemContext] = useState<ItemContextState | null>(null);
   const [shareUrl, setShareUrl] = useState("");
+  const [shortcutState, setShortcutState] = useState<ShortcutState>(initialShortcut ? "running" : "idle");
   const feedRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
+  const shortcutHandled = useRef<string | null>(null);
+  const shortcutRunning = useRef(false);
+  const shortcutAction = useRef<(operation: ShortcutOperation) => Promise<void>>(async () => undefined);
 
   const displayMe = me ?? { id: "", nick: "익명", display: "익명", admin: false };
   const me2 = admin ? { ...displayMe, admin: true, id: displayMe.id, nick: displayMe.nick, display: displayMe.display || displayMe.nick } : displayMe;
@@ -550,12 +557,16 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   };
   const submitText = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
     const item = await postItem(isUrl(trimmed) ? { type: "link", link: buildLink(trimmed) } : { type: "text", body: text });
-    if (item) toast(item.type === "link" ? "링크를 올렸어요" : "텍스트를 올렸어요", item.type === "link" ? I.link : I.text);
+    if (!item) return false;
+    toast(item.type === "link" ? "링크를 올렸어요" : "텍스트를 올렸어요", item.type === "link" ? I.link : I.text);
+    return true;
   };
   const submitFiles = async (files: FileList | File[]) => {
-    const list = Array.from(files).filter((file) => file.size <= 20 * 1024 * 1024);
+    const sourceFiles = Array.from(files);
+    const list = sourceFiles.filter((file) => file.size <= 20 * 1024 * 1024);
+    let posted = 0;
     await Promise.all(list.map(async (file, index) => {
       await new Promise((resolve) => window.setTimeout(resolve, index * 120));
       const author = ensureMe();
@@ -572,8 +583,11 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       const item = (await res.json()) as ItemRecord;
       addItem(item);
       broadcastItem(item);
+      posted += 1;
     }));
-    if (list.length) toast(`${list.length}개 파일을 올렸어요`, I.file);
+    if (posted) toast(`${posted}개 파일을 올렸어요`, I.file);
+    if (sourceFiles.length > list.length) toast("20MB를 초과한 파일은 올릴 수 없어요", I.file);
+    return { posted, total: sourceFiles.length };
   };
 
   const shortcutSubmitTextRef = useRef(submitText);
@@ -594,19 +608,29 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       const files = Array.from(clipboard.files);
       if (files.length) {
         event.preventDefault();
-        void shortcutSubmitFilesRef.current(files);
+        void shortcutSubmitFilesRef.current(files).then((result) => {
+          if (initialShortcut === "paste" && result.posted > 0) {
+            setShortcutState("done");
+            if (currentChannel) router.replace(channelPath(boardId, currentChannel));
+          }
+        });
         return;
       }
 
       const text = clipboard.getData("text/plain");
       if (!text.trim()) return;
       event.preventDefault();
-      void shortcutSubmitTextRef.current(text);
+      void shortcutSubmitTextRef.current(text).then((posted) => {
+        if (initialShortcut === "paste" && posted) {
+          setShortcutState("done");
+          if (currentChannel) router.replace(channelPath(boardId, currentChannel));
+        }
+      });
     };
 
     window.addEventListener("paste", onShortcutPaste);
     return () => window.removeEventListener("paste", onShortcutPaste);
-  }, []);
+  }, [boardId, currentChannel, initialShortcut, router]);
 
   const toggleAdmin = async () => {
     const enabled = !admin;
@@ -787,10 +811,10 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         });
         await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
         toast("이미지를 클립보드에 복사했어요", I.copy);
-        return;
+        return true;
       } catch {
         toast("이미지를 복사할 수 없어요", I.copy);
-        return;
+        return false;
       }
     }
     const text = item.type === "text" ? item.body ?? "" : item.type === "link" ? item.link?.url ?? "" : item.file?.name ?? "";
@@ -798,10 +822,84 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       if (!navigator.clipboard?.writeText) throw new Error("Text clipboard is not supported");
       await navigator.clipboard.writeText(text);
       toast("클립보드에 복사했어요", I.copy);
+      return true;
     } catch {
       toast("클립보드에 복사할 수 없어요", I.copy);
+      return false;
     }
   };
+  const runShortcut = async (operation: ShortcutOperation) => {
+    if (shortcutRunning.current) return;
+    shortcutRunning.current = true;
+    setShortcutState("running");
+    try {
+      if (operation === "copy") {
+        const latest = channelItems[0];
+        if (!latest) {
+          setShortcutState("empty");
+          return;
+        }
+        if (await copyItem(latest)) {
+          setShortcutState("done");
+          if (currentChannel) router.replace(channelPath(boardId, currentChannel));
+        } else {
+          setShortcutState("blocked");
+        }
+        return;
+      }
+
+      let payload: Awaited<ReturnType<typeof readClipboardPayload>>;
+      try {
+        payload = await readClipboardPayload();
+      } catch {
+        setShortcutState("blocked");
+        return;
+      }
+      if (!payload.text.trim() && payload.files.length === 0) {
+        setShortcutState("empty");
+        return;
+      }
+
+      let total = 0;
+      let posted = 0;
+      if (payload.text.trim()) {
+        total += 1;
+        if (await submitText(payload.text)) posted += 1;
+      }
+      if (payload.files.length) {
+        const result = await submitFiles(payload.files);
+        total += result.total;
+        posted += result.posted;
+      }
+      if (posted > 0) {
+        if (posted < total) toast("클립보드의 일부 내용만 올렸어요", I.file);
+        setShortcutState("done");
+        if (currentChannel) router.replace(channelPath(boardId, currentChannel));
+      } else {
+        setShortcutState("blocked");
+      }
+    } catch {
+      setShortcutState("blocked");
+      toast("클립보드 작업을 마치지 못했어요. 다시 시도해 주세요.", I.file);
+    } finally {
+      shortcutRunning.current = false;
+    }
+  };
+  shortcutAction.current = runShortcut;
+
+  useEffect(() => {
+    if (!initialShortcut) {
+      shortcutHandled.current = null;
+      setShortcutState("idle");
+      return;
+    }
+    if (!me) return;
+    const runKey = `${boardId}:${channel}:${initialShortcut}`;
+    if (shortcutHandled.current === runKey) return;
+    shortcutHandled.current = runKey;
+    void shortcutAction.current(initialShortcut);
+  }, [boardId, channel, initialShortcut, me]);
+
   const copyItemLink = async (item: ItemRecord) => {
     const url = new URL(`/x/${encodeURIComponent(item.id)}`, window.location.origin).toString();
     try {
@@ -869,6 +967,26 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} onOpenLink={(item) => { openItemLink(item); setItemContext(null); }} />}
       {moveTarget && <MoveChannelModal admin={admin} channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
       <Channels channels={channels} current={channel} counts={counts} admin={admin} onPick={pickChannel} onAdd={addChannel} onEdit={editChannel} onArchive={archiveChannel} onHide={hideChannel} onReorder={reorderChannelList} onDelete={deleteChannel} />
+      {initialShortcut && shortcutState !== "done" && (
+        <div className="shortcut-action" role="status" aria-live="polite">
+          <span>
+            {shortcutState === "running"
+              ? initialShortcut === "copy" ? "최신 게시물을 클립보드에 복사하는 중…" : "클립보드 내용을 게시하는 중…"
+              : shortcutState === "empty"
+                ? initialShortcut === "copy" ? "복사할 게시물이 없습니다." : "클립보드에 게시할 텍스트나 파일이 없습니다."
+                : initialShortcut === "copy"
+                  ? "자동 복사가 차단됐어요. 버튼을 눌러 다시 시도하세요."
+                  : "자동 읽기가 차단됐어요. 버튼을 눌러 다시 시도하거나 Ctrl+V를 누르세요."}
+          </span>
+          <button
+            className="btn-pri"
+            onClick={() => void runShortcut(initialShortcut)}
+            disabled={shortcutState === "running" || (initialShortcut === "copy" && channelItems.length === 0)}
+          >
+            {shortcutState === "running" ? "처리 중…" : initialShortcut === "copy" ? "다시 복사" : "클립보드에서 게시"}
+          </button>
+        </div>
+      )}
       <main className="feed" ref={feedRef}>
         <div className="feed-inner">
           <PinnedSection items={pinnedItems} me={me2} admin={admin} onDelete={deleteItem} onCopy={copyItem} onReact={react} reactions={reactions} onTogglePin={togglePin} onTaskToggle={toggleChecklist} dense={dense} />
@@ -1600,8 +1718,8 @@ function clipboardFileName(mime: string, index: number) {
 }
 
 function Composer({ onSubmitText, onSubmitFiles }: {
-  onSubmitText: (text: string) => Promise<void>;
-  onSubmitFiles: (files: File[]) => Promise<void>;
+  onSubmitText: (text: string) => Promise<boolean>;
+  onSubmitFiles: (files: File[]) => Promise<FileSubmissionResult>;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -1624,25 +1742,8 @@ function Composer({ onSubmitText, onSubmitFiles }: {
     setReading(true);
     setClipboardError("");
     try {
-      if (navigator.clipboard?.read) {
-        const clipboardItems = await navigator.clipboard.read();
-        const pastedFiles: File[] = [];
-        let text = "";
-        for (const item of clipboardItems) {
-          const fileType = item.types.find((type) => !type.startsWith("text/"));
-          if (fileType) {
-            const blob = await item.getType(fileType);
-            pastedFiles.push(new File([blob], clipboardFileName(fileType, pastedFiles.length), { type: fileType }));
-          } else if (item.types.includes("text/plain")) {
-            text += await (await item.getType("text/plain")).text();
-          }
-        }
-        stageClipboard(text, pastedFiles);
-      } else if (navigator.clipboard?.readText) {
-        stageClipboard(await navigator.clipboard.readText(), []);
-      } else {
-        throw new Error("Clipboard API unavailable");
-      }
+      const payload = await readClipboardPayload();
+      stageClipboard(payload.text, payload.files);
     } catch {
       setClipboardError("클립보드 권한을 허용하거나 Ctrl+V로 붙여넣어 주세요.");
     } finally {
@@ -1788,6 +1889,28 @@ function TextBody({ item, reactions, myId, onReact, onTaskToggle }: { item: Item
   const choices = parsePollChoices(parts[1] ?? "");
   const beforeCount = countMarkdownChecklistTasks(parts[0] ?? "");
   return <div className="md">{parts[0]?.trim() && <MarkdownPreview source={parts[0]} onTaskToggle={(taskIndex, checked) => onTaskToggle(item.id, taskIndex, checked)} nested />}<PollBlock choices={choices} itemId={item.id} reactions={reactions} myId={myId} onReact={onReact} />{parts[2]?.trim() && <MarkdownPreview source={parts[2]} taskIndexOffset={beforeCount} onTaskToggle={(taskIndex, checked) => onTaskToggle(item.id, taskIndex, checked)} nested />}</div>;
+}
+
+async function readClipboardPayload() {
+  if (navigator.clipboard?.read) {
+    const clipboardItems = await navigator.clipboard.read();
+    const files: File[] = [];
+    let text = "";
+    for (const item of clipboardItems) {
+      const fileType = item.types.find((type) => !type.startsWith("text/"));
+      if (fileType) {
+        const blob = await item.getType(fileType);
+        files.push(new File([blob], clipboardFileName(fileType, files.length), { type: fileType }));
+      } else if (item.types.includes("text/plain")) {
+        text += await (await item.getType("text/plain")).text();
+      }
+    }
+    return { text, files };
+  }
+  if (navigator.clipboard?.readText) {
+    return { text: await navigator.clipboard.readText(), files: [] as File[] };
+  }
+  throw new Error("Clipboard API unavailable");
 }
 
 function MarkdownPreview({ source, nested = false, taskIndexOffset = 0, onTaskToggle }: { source: string; nested?: boolean; taskIndexOffset?: number; onTaskToggle?: (taskIndex: number, checked: boolean) => void }) {

@@ -278,6 +278,9 @@ kbd {
 .archive-dropdown-menu button > small.archive-kind { margin-left: auto; color: var(--accent-ink); }
 
 .feed { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
+.shortcut-action { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px max(18px, var(--safe-right)) 9px max(18px, var(--safe-left)); border-bottom: 1px solid var(--hair); background: var(--surface); }
+.shortcut-action > span { color: var(--muted); font-size: 12px; }
+.shortcut-action > button { flex: 0 0 auto; }
 .feed-inner {
   max-width: 688px;
   margin: 0 auto;

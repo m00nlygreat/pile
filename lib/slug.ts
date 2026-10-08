@@ -23,7 +23,7 @@ export function slugFromChannelName(name: string) {
 }
 
 export function uniqueSlug(baseSlug: string, usedSlugs: Iterable<string>) {
-  const used = new Set(Array.from(usedSlugs, (slug) => slug.toLowerCase()));
+  const used = new Set(["c", "p", ...Array.from(usedSlugs, (slug) => slug.toLowerCase())]);
   let slug = baseSlug;
   let index = 2;
   while (used.has(slug.toLowerCase())) {
@@ -35,4 +35,8 @@ export function uniqueSlug(baseSlug: string, usedSlugs: Iterable<string>) {
 
 export function isValidChannelSlug(slug: string) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+}
+
+export function isReservedChannelSlug(slug: string) {
+  return slug.toLowerCase() === "c" || slug.toLowerCase() === "p";
 }
