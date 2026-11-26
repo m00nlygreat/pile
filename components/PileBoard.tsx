@@ -1280,8 +1280,7 @@ function Topbar({ boardId, boardDisplayName, shareUrl, me, admin, peers, status,
   return (
     <header className="topbar">
       <div className="tb-left">
-        <Link className="logo" href="/" aria-label="pile 홈으로 이동"><span className="logo-mark"><span /><span /><span /></span>pile</Link>
-        <strong className="board-display-name" title={boardDisplayName}>{boardDisplayName}</strong>
+        <strong className="board-title" title={boardDisplayName}>{boardDisplayName}</strong>
         <button className="board-url" onClick={onShare} title="보드 URL 공유"><span className="bu-host">{host ? `${host}/` : ""}</span><span className="bu-id">{boardId}</span><I.share s={13} /></button>
       </div>
       <div className="tb-right">
