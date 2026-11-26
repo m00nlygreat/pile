@@ -139,6 +139,7 @@ kbd {
 }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .logo { display: flex; align-items: center; gap: 9px; color: inherit; font-weight: 680; font-size: 17px; flex: 0 0 auto; text-decoration: none; }
+.topbar .logo { min-width: 0; flex: 0 1 auto; }
 .topbar a.logo, .topbar a.logo:link, .topbar a.logo:visited, .topbar a.logo:hover, .topbar a.logo:active { color: var(--ink); text-decoration: none; }
 .logo-mark { display: inline-grid; width: 18px; height: 18px; align-content: end; gap: 2px; transform: rotate(-3deg); }
 .logo-mark span { display: block; height: 4px; border-radius: 2px; background: var(--accent); }
@@ -724,6 +725,7 @@ button.submission-person.submitted:hover { border-color: var(--accent); backgrou
   }
   .tb-left, .tb-right { width: 100%; justify-content: space-between; gap: 8px; }
   .tb-right { overflow-x: auto; padding-bottom: 1px; }
+  .topbar .logo { flex: 1 1 auto; }
   .board-title { flex: 1 1 auto; max-width: none; font-size: 19px; }
   .board-url { flex: 0 1 auto; justify-content: center; }
   .board-url .bu-host { display: none; }
