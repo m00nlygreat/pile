@@ -377,6 +377,7 @@ function channelPath(boardId: string, channel: Pick<ChannelRecord, "id" | "slug"
 export function PileBoard({ boardId, initialChannelSlug = "default", initialData, initialShortcut }: { boardId: string; initialChannelSlug?: string; initialData: BoardPayload; initialShortcut?: ShortcutOperation }) {
   const router = useRouter();
   const [channels, setChannels] = useState(initialData.channels);
+  const [boardDisplayName, setBoardDisplayName] = useState(initialData.board.displayName || boardId);
   const [participants, setParticipants] = useState(initialData.users);
   const [items, setItems] = useState(initialData.items);
   const [reactions, setReactions] = useState(initialData.reactions);
@@ -477,11 +478,20 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     setParticipants((prev) => (prev.some((user) => user.id === item.user.id) ? prev : [...prev, { ...item.user, admin: false }]));
   }, []);
   const applyServerPayload = useCallback((payload: BoardPayload) => {
+    setBoardDisplayName(payload.board.displayName || boardId);
     setChannels(payload.channels);
     setParticipants(payload.users);
     setItems(payload.items);
     setReactions(payload.reactions);
-  }, []);
+  }, [boardId]);
+  const refreshChannelList = useCallback(async () => {
+    const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const payload = await res.json() as BoardPayload;
+    setChannels(payload.channels);
+    setBoardDisplayName(payload.board.displayName || boardId);
+    return payload.channels;
+  }, [boardId]);
   const applyReactions = useCallback((next: BoardPayload["reactions"]) => {
     setReactions(next);
   }, []);
@@ -657,6 +667,22 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     }
     toast(enabled ? "관리자 모드 · 모든 아이템 관리 가능" : "관리자 모드를 껐어요", I.shield);
   };
+  const saveBoardDisplayName = async (displayName: string) => {
+    const res = await fetch(`/api/admin/boards/${encodeURIComponent(boardId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      toast(payload?.error ?? "보드 이름을 저장할 수 없어요", I.edit);
+      return false;
+    }
+    const payload = await res.json() as { displayName: string };
+    setBoardDisplayName(payload.displayName || boardId);
+    toast("보드 이름을 저장했어요", I.check);
+    return true;
+  };
   const addChannel = async (name: string) => {
     const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/channels`, {
       method: "POST",
@@ -664,11 +690,12 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       body: JSON.stringify({ name }),
     });
     if (!res.ok) return toast("관리자 권한이 필요해요", I.shield);
-    const next = (await res.json()) as ChannelRecord;
-    setChannels((prev) => [...prev, next]);
+    const created = (await res.json()) as ChannelRecord;
+    const refreshed = await refreshChannelList();
+    const next = refreshed?.find((item) => item.id === created.id) ?? created;
     setChannel(next.id);
     router.push(channelPath(boardId, next));
-    toast(`#${name} 채널을 만들었어요`, I.hash);
+    toast(`#${next.name} 채널을 만들었어요`, I.hash);
   };
   const pickChannel = useCallback((next: ChannelRecord) => {
     setChannel(next.id);
@@ -685,9 +712,10 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       return payload?.error ?? "채널을 수정할 수 없습니다.";
     }
     const updated = (await res.json()) as ChannelRecord;
-    setChannels((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-    if (channel === updated.id) router.replace(channelPath(boardId, updated));
-    toast(`#${updated.name} 채널을 수정했어요`, I.edit);
+    const refreshed = await refreshChannelList();
+    const next = refreshed?.find((item) => item.id === updated.id) ?? updated;
+    if (channel === next.id) router.replace(channelPath(boardId, next));
+    toast(`#${next.name} 채널을 수정했어요`, I.edit);
     return null;
   };
   const deleteChannel = async (target: ChannelRecord) => {
@@ -702,8 +730,9 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     }
     const payload = (await res.json()) as { deletedItems?: number };
     const removedItemIds = new Set(items.filter((item) => item.channel === target.id).map((item) => item.id));
-    const remaining = channels.filter((item) => item.id !== target.id);
-    setChannels(remaining);
+    const refreshed = await refreshChannelList();
+    const remaining = (refreshed ?? channels).filter((item) => item.id !== target.id);
+    if (!refreshed) setChannels(remaining);
     setItems((prev) => prev.filter((item) => item.channel !== target.id));
     setReactions((prev) => Object.fromEntries(Object.entries(prev).filter(([itemId]) => !removedItemIds.has(itemId))));
     if (channel === target.id) {
@@ -726,13 +755,17 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       return;
     }
     const payload = (await res.json()) as { archivedAt: number | null };
-    setChannels((prev) => prev.map((item) => (item.id === target.id ? { ...item, archived, archivedAt: payload.archivedAt } : item)));
+    const refreshed = await refreshChannelList();
+    const next = refreshed?.find((item) => item.id === target.id) ?? { ...target, archived, archivedAt: payload.archivedAt };
+    if (!refreshed) setChannels((prev) => prev.map((item) => item.id === target.id ? next : item));
     if (archived && channel === target.id) {
-      const fallback = channels.find((item) => item.id !== target.id && !item.archived && !item.hidden);
+      const fallback = (refreshed ?? channels).find((item) => item.id !== target.id && !item.archived && !item.hidden);
       if (fallback) {
         setChannel(fallback.id);
         router.push(channelPath(boardId, fallback));
       }
+    } else if (!archived && channel === target.id && !next.hidden) {
+      router.push(channelPath(boardId, next));
     }
     toast(archived ? `#${target.name} 채널을 아카이브했어요` : `#${target.name} 채널을 복원했어요`, I.archive);
   };
@@ -748,15 +781,17 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
       return;
     }
     const payload = (await res.json()) as { hiddenAt: number | null };
-    setChannels((prev) => prev.map((item) => (item.id === target.id ? { ...item, hidden, hiddenAt: payload.hiddenAt } : item)));
+    const refreshed = await refreshChannelList();
+    const next = refreshed?.find((item) => item.id === target.id) ?? { ...target, hidden, hiddenAt: payload.hiddenAt };
+    if (!refreshed) setChannels((prev) => prev.map((item) => item.id === target.id ? next : item));
     if (hidden && channel === target.id) {
-      const fallback = channels.find((item) => item.id !== target.id && !item.archived && !item.hidden);
+      const fallback = (refreshed ?? channels).find((item) => item.id !== target.id && !item.archived && !item.hidden);
       if (fallback) {
         setChannel(fallback.id);
         router.push(channelPath(boardId, fallback));
       }
-    } else if (!hidden && channel === target.id && !target.archived) {
-      router.push(channelPath(boardId, target));
+    } else if (!hidden && channel === target.id && !next.archived) {
+      router.push(channelPath(boardId, next));
     }
     toast(hidden ? `#${target.name} 채널을 숨겼어요` : `#${target.name} 채널을 다시 표시했어요`, I.eyeOff);
   };
@@ -773,6 +808,8 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
     if (!res.ok) {
       setChannels(previous);
       toast("채널 순서를 저장할 수 없어요", I.hash);
+    } else {
+      await refreshChannelList();
     }
   };
   const togglePin = async (item: ItemRecord) => {
@@ -944,8 +981,8 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
         }
       }}
     >
-      <Topbar boardId={boardId} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} onShowParticipants={() => setShowParticipants(true)} />
-      {showShare && shareUrl && <UrlModal url={shareUrl} onClose={() => setShowShare(false)} />}
+      <Topbar boardId={boardId} boardDisplayName={boardDisplayName} shareUrl={shareUrl} me={me2} admin={admin} peers={peers} status={status} onToggleAdmin={toggleAdmin} onRename={renameMe} onShare={() => setShowShare(true)} onShowParticipants={() => setShowParticipants(true)} />
+      {showShare && shareUrl && <UrlModal url={shareUrl} boardId={boardId} displayName={boardDisplayName} admin={admin} onSaveName={saveBoardDisplayName} onClose={() => setShowShare(false)} />}
       {showParticipants && admin && <ParticipantsModal boardId={boardId} me={me2} onClose={() => setShowParticipants(false)} onKicked={(userId) => setParticipants((current) => current.filter((user) => user.id !== userId))} />}
       {itemContext && <ItemContextMenu admin={admin} state={itemContext} onClose={() => setItemContext(null)} onMove={() => { setMoveTarget(itemContext.item); setItemContext(null); }} onCopyLink={(item) => { void copyItemLink(item); setItemContext(null); }} onOpenLink={(item) => { openItemLink(item); setItemContext(null); }} />}
       {moveTarget && <MoveChannelModal admin={admin} channels={channels} item={moveTarget} onClose={() => setMoveTarget(null)} onMoved={moveItem} />}
@@ -1006,8 +1043,10 @@ export function PileBoard({ boardId, initialChannelSlug = "default", initialData
   );
 }
 
-function UrlModal({ url, onClose }: { url: string; onClose: () => void }) {
+function UrlModal({ url, boardId, displayName, admin, onSaveName, onClose }: { url: string; boardId: string; displayName: string; admin: boolean; onSaveName: (displayName: string) => Promise<boolean>; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [name, setName] = useState(displayName);
+  const [saving, setSaving] = useState(false);
   const copy = () => {
     navigator.clipboard?.writeText(url).catch(() => undefined);
     setCopied(true);
@@ -1023,6 +1062,20 @@ function UrlModal({ url, onClose }: { url: string; onClose: () => void }) {
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <div className="modal-qr"><QRCodeSVG value={url} size={400} /></div>
         <p className="modal-url">{url}</p>
+        {admin && (
+          <form className="board-name-editor" onSubmit={async (event) => {
+            event.preventDefault();
+            if (saving) return;
+            setSaving(true);
+            const saved = await onSaveName(name);
+            setSaving(false);
+            if (saved) setName(name.trim() || boardId);
+          }}>
+            <label htmlFor="board-display-name">보드 이름</label>
+            <div><input id="board-display-name" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /><button className="btn-pri" type="submit" disabled={saving}>{saving ? "저장 중…" : "저장"}</button></div>
+            <small>빈 이름을 저장하면 보드 ID({boardId})를 사용합니다. 주소는 기존 ID와 채널 slug로 유지됩니다.</small>
+          </form>
+        )}
         <div className="modal-actions">
           <button className="btn-pri" onClick={copy}><I.copy s={14} />{copied ? "복사됨!" : "주소 복사"}</button>
           <button className="btn-ghost" onClick={onClose}>닫기</button>
@@ -1220,7 +1273,7 @@ function MoveChannelModal({ admin, channels, item, onClose, onMoved }: { admin: 
   );
 }
 
-function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, onRename, onShare, onShowParticipants }: { boardId: string; shareUrl: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onShare: () => void; onShowParticipants: () => void }) {
+function Topbar({ boardId, boardDisplayName, shareUrl, me, admin, peers, status, onToggleAdmin, onRename, onShare, onShowParticipants }: { boardId: string; boardDisplayName: string; shareUrl: string; me: UserRecord; admin: boolean; peers: Record<string, Peer>; status: "connecting" | "live"; onToggleAdmin: () => void; onRename: (name: string) => void; onShare: () => void; onShowParticipants: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.display);
   const host = shareUrl ? new URL(shareUrl).host : "";
@@ -1228,6 +1281,7 @@ function Topbar({ boardId, shareUrl, me, admin, peers, status, onToggleAdmin, on
     <header className="topbar">
       <div className="tb-left">
         <Link className="logo" href="/" aria-label="pile 홈으로 이동"><span className="logo-mark"><span /><span /><span /></span>pile</Link>
+        <strong className="board-display-name" title={boardDisplayName}>{boardDisplayName}</strong>
         <button className="board-url" onClick={onShare} title="보드 URL 공유"><span className="bu-host">{host ? `${host}/` : ""}</span><span className="bu-id">{boardId}</span><I.share s={13} /></button>
       </div>
       <div className="tb-right">

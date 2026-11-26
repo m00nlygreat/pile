@@ -40,3 +40,9 @@ export function isValidChannelSlug(slug: string) {
 export function isReservedChannelSlug(slug: string) {
   return slug.toLowerCase() === "c" || slug.toLowerCase() === "p";
 }
+
+const RESERVED_BOARD_IDS = new Set(["live", "getlive"]);
+
+export function isReservedBoardId(boardId: string) {
+  return RESERVED_BOARD_IDS.has(boardId.trim().toLowerCase());
+}

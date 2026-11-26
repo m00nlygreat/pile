@@ -19,6 +19,9 @@ export type ChannelRecord = {
   archivedAt: number | null;
   hidden: boolean;
   hiddenAt: number | null;
+  isLive: boolean;
+  liveActive: boolean;
+  liveArchivedAt: number | null;
 };
 
 export type LinkPayload = {

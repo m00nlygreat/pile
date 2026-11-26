@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CHANNELS, seedChannels } from "@/lib/seed";
 import { deleteStoredFileSync } from "@/lib/file-storage";
 import { toggleMarkdownChecklist } from "@/lib/markdown-checklist";
-import { isReservedChannelSlug, slugFromChannelName, uniqueSlug } from "@/lib/slug";
+import { isReservedBoardId, isReservedChannelSlug, slugFromChannelName, uniqueSlug } from "@/lib/slug";
 import type { BoardPayload, BoardSummary, ChannelRecord, FilePayload, ItemRecord, LinkPayload, UserRecord } from "@/lib/types";
 
 const DB_PATH = process.env.PILE_DB_PATH || join(process.cwd(), "data", "pile.sqlite");
@@ -22,6 +22,7 @@ function getDb() {
       throw error;
     }
     db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 5000");
     db.exec(`
       CREATE TABLE IF NOT EXISTS boards (
         id TEXT PRIMARY KEY,
@@ -38,6 +39,9 @@ function getDb() {
         archived_at INTEGER,
         hidden INTEGER NOT NULL DEFAULT 0,
         hidden_at INTEGER,
+        is_live INTEGER NOT NULL DEFAULT 0,
+        live_active INTEGER NOT NULL DEFAULT 0,
+        live_archived_at INTEGER,
         position INTEGER NOT NULL,
         PRIMARY KEY (board_id, id)
       );
@@ -80,6 +84,7 @@ function getDb() {
     migrateChannelTypes(db);
     migrateChannelArchived(db);
     migrateChannelHidden(db);
+    migrateChannelLive(db);
     migrateUserProfiles(db);
   }
   return db;
@@ -145,6 +150,20 @@ function migrateChannelHidden(conn: DatabaseSync) {
   }
 }
 
+function migrateChannelLive(conn: DatabaseSync) {
+  const columns = conn.prepare("PRAGMA table_info(channels)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "is_live")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!columns.some((column) => column.name === "live_active")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN live_active INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!columns.some((column) => column.name === "live_archived_at")) {
+    conn.exec("ALTER TABLE channels ADD COLUMN live_archived_at INTEGER");
+  }
+  conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS channels_one_active_live ON channels(live_active) WHERE live_active = 1");
+}
+
 function migrateUserProfiles(conn: DatabaseSync) {
   const columns = conn.prepare("PRAGMA table_info(items)").all() as { name: string }[];
   if (!columns.some((column) => column.name === "user_id")) {
@@ -190,6 +209,9 @@ type ChannelRow = {
   archivedAt: number | null;
   hidden: number;
   hiddenAt: number | null;
+  isLive: number;
+  liveActive: number;
+  liveArchivedAt: number | null;
   position: number;
 };
 
@@ -204,9 +226,14 @@ function channelRecord(row: ChannelRow): ChannelRecord {
     archivedAt: row.archivedAt == null ? null : Number(row.archivedAt),
     hidden: Boolean(row.hidden),
     hiddenAt: row.hiddenAt == null ? null : Number(row.hiddenAt),
+    isLive: Boolean(row.isLive),
+    liveActive: Boolean(row.liveActive),
+    liveArchivedAt: row.liveArchivedAt == null ? null : Number(row.liveArchivedAt),
     position: Number(row.position),
   };
 }
+
+const CHANNEL_SELECT = "SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, is_live as isLive, live_active as liveActive, live_archived_at as liveArchivedAt, position FROM channels";
 
 export async function isAdminRequest() {
   const jar = await cookies();
@@ -228,20 +255,30 @@ export function ensureBoard(boardId: string) {
   const conn = getDb();
   const exists = conn.prepare("SELECT id FROM boards WHERE id = ?").get(boardId);
   if (exists) return;
-  conn.prepare("INSERT INTO boards (id, display_name, created_at) VALUES (?, ?, ?)").run(boardId, boardId, Date.now());
-  const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, hidden, hidden_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-  seedChannels(boardId).forEach((channel) => insertChannel.run(
-    channel.id,
-    channel.boardId,
-    channel.slug,
-    channel.name,
-    channel.type,
-    channel.archived ? 1 : 0,
-    channel.archivedAt,
-    channel.hidden ? 1 : 0,
-    channel.hiddenAt,
-    channel.position,
-  ));
+  if (isReservedBoardId(boardId)) throw new Error(`Board ID is reserved: ${boardId}`);
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    const inserted = conn.prepare("INSERT OR IGNORE INTO boards (id, display_name, created_at) VALUES (?, ?, ?)").run(boardId, boardId, Date.now());
+    if (inserted.changes > 0) {
+      const insertChannel = conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, hidden, hidden_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      seedChannels(boardId).forEach((channel) => insertChannel.run(
+        channel.id,
+        channel.boardId,
+        channel.slug,
+        channel.name,
+        channel.type,
+        channel.archived ? 1 : 0,
+        channel.archivedAt,
+        channel.hidden ? 1 : 0,
+        channel.hiddenAt,
+        channel.position,
+      ));
+    }
+    conn.exec("COMMIT");
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function boardExists(boardId: string) {
@@ -258,6 +295,13 @@ export function listBoards(): BoardSummary[] {
     displayName: String(board.displayName),
     createdAt: Number(board.createdAt),
   }));
+}
+
+export function updateBoardDisplayName(boardId: string, displayName: string) {
+  ensureBoard(boardId);
+  const normalizedName = displayName.trim() || boardId;
+  getDb().prepare("UPDATE boards SET display_name = ? WHERE id = ?").run(normalizedName, boardId);
+  return { id: boardId, displayName: normalizedName };
 }
 
 export function deleteBoard(boardId: string) {
@@ -299,7 +343,7 @@ export function getBoardPayload(boardId: string, includeHidden = false): BoardPa
   }
   const board = boardRow ? { id: String(boardRow.id), displayName: String(boardRow.displayName) } : undefined;
   const channelRows = conn
-    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? ORDER BY position ASC")
+    .prepare(`${CHANNEL_SELECT} WHERE board_id = ? ORDER BY position ASC`)
     .all(boardId) as unknown as ChannelRow[];
   const allChannels = channelRows.map(channelRecord);
   const channels = includeHidden ? allChannels : allChannels.filter((channel) => !channel.hidden);
@@ -356,34 +400,51 @@ export function getBoardPayload(boardId: string, includeHidden = false): BoardPa
 export function createChannel(boardId: string, name: string, type: ChannelRecord["type"] = "standard") {
   ensureBoard(boardId);
   const conn = getDb();
-  const maxRow = conn.prepare("SELECT COALESCE(MAX(position), -1) as maxPos FROM channels WHERE board_id = ?").get(boardId) as { maxPos: number };
-  const existing = conn.prepare("SELECT slug FROM channels WHERE board_id = ?").all(boardId) as { slug: string }[];
-  const slug = uniqueSlug(slugFromChannelName(name), existing.map((channel) => channel.slug));
-  const channel = {
-    id: uid("ch"),
-    boardId,
-    slug,
-    name,
-    type,
-    archived: false,
-    archivedAt: null,
-    hidden: false,
-    hiddenAt: null,
-    position: maxRow.maxPos + 1,
-  };
-  conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, hidden, hidden_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
-    channel.id,
-    channel.boardId,
-    channel.slug,
-    channel.name,
-    channel.type,
-    0,
-    null,
-    0,
-    null,
-    channel.position,
-  );
-  return channel;
+  const normalizedName = name.trim();
+  const isLive = normalizedName.toLowerCase() === "live";
+  const channelId = uid("ch");
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    const maxRow = conn.prepare("SELECT COALESCE(MAX(position), -1) as maxPos FROM channels WHERE board_id = ?").get(boardId) as { maxPos: number };
+    const existing = conn.prepare("SELECT slug FROM channels WHERE board_id = ?").all(boardId) as { slug: string }[];
+    const slug = uniqueSlug(slugFromChannelName(normalizedName), existing.map((channel) => channel.slug));
+    const position = maxRow.maxPos + 1;
+    if (isLive) conn.prepare("UPDATE channels SET live_active = 0, live_archived_at = ? WHERE live_active = 1").run(Date.now());
+    conn.prepare("INSERT INTO channels (id, board_id, slug, name, type, archived, archived_at, hidden, hidden_at, is_live, live_active, live_archived_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      channelId,
+      boardId,
+      slug,
+      normalizedName,
+      type,
+      0,
+      null,
+      0,
+      null,
+      isLive ? 1 : 0,
+      isLive ? 1 : 0,
+      null,
+      position,
+    );
+    conn.exec("COMMIT");
+    return {
+      id: channelId,
+      boardId,
+      slug,
+      name: normalizedName,
+      type,
+      archived: false,
+      archivedAt: null,
+      hidden: false,
+      hiddenAt: null,
+      isLive,
+      liveActive: isLive,
+      liveArchivedAt: null,
+      position,
+    } satisfies ChannelRecord;
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function reorderChannels(boardId: string, channelIds: string[]) {
@@ -413,7 +474,7 @@ export function updateChannel(boardId: string, channelId: string, name: string, 
   ensureBoard(boardId);
   const conn = getDb();
   const current = conn
-    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? AND id = ?")
+    .prepare(`${CHANNEL_SELECT} WHERE board_id = ? AND id = ?`)
     .get(boardId, channelId) as ChannelRow | undefined;
   if (!current) return { ok: false as const, reason: "not-found" as const };
   if (isReservedChannelSlug(slug)) return { ok: false as const, reason: "reserved-slug" as const };
@@ -442,31 +503,84 @@ export function setChannelType(boardId: string, channelId: string, type: Channel
 export function setChannelArchived(boardId: string, channelId: string, archived: boolean) {
   ensureBoard(boardId);
   const conn = getDb();
-  const archivedAt = archived ? Date.now() : null;
-  const result = conn.prepare("UPDATE channels SET archived = ?, archived_at = ? WHERE board_id = ? AND id = ?").run(archived ? 1 : 0, archivedAt, boardId, channelId);
-  if (result.changes === 0) return { ok: false as const, reason: "not-found" as const };
-  return { ok: true as const, archivedAt };
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    const current = conn.prepare(`${CHANNEL_SELECT} WHERE board_id = ? AND id = ?`).get(boardId, channelId) as ChannelRow | undefined;
+    if (!current) {
+      conn.exec("ROLLBACK");
+      return { ok: false as const, reason: "not-found" as const };
+    }
+    if (!archived && current.hidden) {
+      conn.exec("ROLLBACK");
+      return { ok: false as const, reason: "hidden" as const };
+    }
+    if (Boolean(current.archived) === archived) {
+      conn.exec("ROLLBACK");
+      return { ok: true as const, archivedAt: current.archivedAt == null ? null : Number(current.archivedAt) };
+    }
+
+    const now = Date.now();
+    const archivedAt = archived ? now : null;
+    if (archived) {
+      conn.prepare("UPDATE channels SET archived = 1, archived_at = ?, live_active = 0, live_archived_at = CASE WHEN live_active = 1 THEN ? ELSE live_archived_at END WHERE board_id = ? AND id = ?")
+        .run(archivedAt, now, boardId, channelId);
+    } else {
+      if (current.isLive) {
+        conn.prepare("UPDATE channels SET live_active = 0, live_archived_at = ? WHERE live_active = 1").run(now);
+      }
+      conn.prepare("UPDATE channels SET archived = 0, archived_at = NULL, live_active = CASE WHEN is_live = 1 THEN 1 ELSE 0 END WHERE board_id = ? AND id = ?")
+        .run(boardId, channelId);
+    }
+    conn.exec("COMMIT");
+    return { ok: true as const, archivedAt };
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function setChannelHidden(boardId: string, channelId: string, hidden: boolean) {
   ensureBoard(boardId);
   const conn = getDb();
-  const hiddenAt = hidden ? Date.now() : null;
-  const result = conn.prepare("UPDATE channels SET hidden = ?, hidden_at = ? WHERE board_id = ? AND id = ?").run(hidden ? 1 : 0, hiddenAt, boardId, channelId);
-  if (result.changes === 0) return { ok: false as const, reason: "not-found" as const };
-  return { ok: true as const, hiddenAt };
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    const current = conn.prepare(`${CHANNEL_SELECT} WHERE board_id = ? AND id = ?`).get(boardId, channelId) as ChannelRow | undefined;
+    if (!current) {
+      conn.exec("ROLLBACK");
+      return { ok: false as const, reason: "not-found" as const };
+    }
+    if (Boolean(current.hidden) === hidden) {
+      conn.exec("ROLLBACK");
+      return { ok: true as const, hiddenAt: current.hiddenAt == null ? null : Number(current.hiddenAt) };
+    }
+    const now = Date.now();
+    const hiddenAt = hidden ? now : null;
+    if (hidden && current.isLive && current.liveActive) {
+      conn.prepare("UPDATE channels SET hidden = 1, hidden_at = ?, archived = 1, archived_at = ?, live_active = 0, live_archived_at = ? WHERE board_id = ? AND id = ?")
+        .run(hiddenAt, now, now, boardId, channelId);
+    } else {
+      conn.prepare("UPDATE channels SET hidden = ?, hidden_at = ? WHERE board_id = ? AND id = ?")
+        .run(hidden ? 1 : 0, hiddenAt, boardId, channelId);
+    }
+    conn.exec("COMMIT");
+    return { ok: true as const, hiddenAt };
+  } catch (error) {
+    conn.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function deleteChannel(boardId: string, channelId: string) {
   ensureBoard(boardId);
   const conn = getDb();
-  const current = conn.prepare("SELECT 1 FROM channels WHERE board_id = ? AND id = ?").get(boardId, channelId);
+  const current = conn.prepare(`${CHANNEL_SELECT} WHERE board_id = ? AND id = ?`).get(boardId, channelId) as ChannelRow | undefined;
   if (!current) return { ok: false as const, reason: "not-found" as const };
 
   const itemCount = conn.prepare("SELECT COUNT(*) as count FROM items WHERE board_id = ? AND channel = ?").get(boardId, channelId) as { count: number };
   const fileRows = conn.prepare("SELECT id FROM items WHERE board_id = ? AND channel = ? AND type = 'file'").all(boardId, channelId) as { id: string }[];
   conn.exec("BEGIN IMMEDIATE");
   try {
+    if (current.liveActive) conn.prepare("UPDATE channels SET live_active = 0, live_archived_at = ? WHERE board_id = ? AND id = ?").run(Date.now(), boardId, channelId);
     conn
       .prepare("DELETE FROM reactions WHERE item_id IN (SELECT id FROM items WHERE board_id = ? AND channel = ?)")
       .run(boardId, channelId);
@@ -493,7 +607,7 @@ export function getChannelBySlug(boardId: string, channelSlug: string, includeHi
     return seedChannels(boardId).find((channel) => channel.slug === channelSlug);
   }
   const row = getDb()
-    .prepare("SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels WHERE board_id = ? AND slug = ?")
+    .prepare(`${CHANNEL_SELECT} WHERE board_id = ? AND slug = ?`)
     .get(boardId, channelSlug) as ChannelRow | undefined;
   if (!row || (!includeHidden && Boolean(row.hidden))) return undefined;
   return channelRecord(row);
@@ -508,11 +622,21 @@ export function getChannelForShortcut(boardId: string, channelSlug?: string, inc
   }
 
   const visibleFilter = includeHidden ? "" : "AND hidden = 0";
-  const select = "SELECT id, board_id as boardId, slug, name, type, archived, archived_at as archivedAt, hidden, hidden_at as hiddenAt, position FROM channels";
   const row = channelSlug
-    ? getDb().prepare(`${select} WHERE board_id = ? AND slug = ? ${visibleFilter}`).get(boardId, channelSlug) as ChannelRow | undefined
-    : getDb().prepare(`${select} WHERE board_id = ? ${visibleFilter} ORDER BY CASE WHEN id = 'default' THEN 0 ELSE 1 END, position ASC LIMIT 1`).get(boardId) as ChannelRow | undefined;
+    ? getDb().prepare(`${CHANNEL_SELECT} WHERE board_id = ? AND slug = ? ${visibleFilter}`).get(boardId, channelSlug) as ChannelRow | undefined
+    : getDb().prepare(`${CHANNEL_SELECT} WHERE board_id = ? ${visibleFilter} ORDER BY CASE WHEN id = 'default' THEN 0 ELSE 1 END, position ASC LIMIT 1`).get(boardId) as ChannelRow | undefined;
   return row ? channelRecord(row) : undefined;
+}
+
+export function getActiveLiveChannel() {
+  const row = getDb().prepare(`
+    SELECT channels.board_id as boardId, channels.slug as channelSlug, boards.display_name as title
+    FROM channels INDEXED BY channels_one_active_live
+    JOIN boards ON boards.id = channels.board_id
+    WHERE channels.live_active = 1
+    LIMIT 1
+  `).get() as { boardId: string; channelSlug: string; title: string } | undefined;
+  return row ? { boardId: String(row.boardId), channelSlug: String(row.channelSlug), title: String(row.title) } : null;
 }
 
 export function getLatestItemId(boardId: string, channelId: string, includeHidden = false) {

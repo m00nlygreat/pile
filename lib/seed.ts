@@ -13,4 +13,7 @@ export const seedChannels = (boardId: string): ChannelRecord[] =>
     archivedAt: null,
     hidden: false,
     hiddenAt: null,
+    isLive: false,
+    liveActive: false,
+    liveArchivedAt: null,
   }));

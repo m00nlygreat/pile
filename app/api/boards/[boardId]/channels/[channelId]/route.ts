@@ -17,6 +17,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   const channelId = decodeURIComponent(rawChannelId);
   if (typeof body.archived === "boolean") {
     const result = setChannelArchived(boardId, channelId, body.archived);
+    if (!result.ok && result.reason === "hidden") {
+      return NextResponse.json({ error: "채널 숨김을 해제한 뒤 복원해 주세요." }, { status: 409 });
+    }
     if (!result.ok) return NextResponse.json({ error: "채널을 찾을 수 없습니다." }, { status: 404 });
     return NextResponse.json({ ok: true, archived: body.archived, archivedAt: result.archivedAt });
   }
