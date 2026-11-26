@@ -163,7 +163,7 @@ kbd {
 .board-url:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
 .bu-host { opacity: .7; }
 .bu-id { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-.board-title { min-width: 0; max-width: clamp(120px, 28vw, 360px); overflow: hidden; color: var(--ink); font-size: 22px; font-weight: 720; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
+.board-title { min-width: 0; max-width: clamp(120px, 28vw, 360px); overflow: hidden; color: var(--ink); font-size: 19px; font-weight: 720; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
 .user-chip, .admin-toggle, .live-badge {
   display: flex;
   align-items: center;
@@ -726,7 +726,7 @@ button.submission-person.submitted:hover { border-color: var(--accent); backgrou
   .tb-left, .tb-right { width: 100%; justify-content: space-between; gap: 8px; }
   .tb-right { overflow-x: auto; padding-bottom: 1px; }
   .topbar .logo { flex: 1 1 auto; }
-  .board-title { flex: 1 1 auto; max-width: none; font-size: 19px; }
+  .board-title { flex: 1 1 auto; max-width: none; font-size: 17px; }
   .board-url { flex: 0 1 auto; justify-content: center; }
   .board-url .bu-host { display: none; }
   .feed-inner { padding-inline: max(12px, var(--safe-left)) max(12px, var(--safe-right)); }
